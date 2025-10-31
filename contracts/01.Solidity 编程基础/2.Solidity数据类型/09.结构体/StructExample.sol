@@ -24,7 +24,7 @@ contract StructExample {
     }
 
     // 整体返回结构体（合约内）
-    function getWholeProduct() public view returns (Product memory) {
+    function getWholeProduct() public pure  returns (Product memory) {
          Product memory product = Product({id: 1, name: "Laptop", price: 999,stock:100});
         return product; // 直接返回整个结构体
     }
