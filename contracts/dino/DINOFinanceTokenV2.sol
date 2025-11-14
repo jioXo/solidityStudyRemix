@@ -881,6 +881,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         uint256 curRefAmount = (orderRatio * 2500) / 10000; // 25% reserved for referral chain
         address cur = IRelation(relShip).getInviter(account);
         uint256 depth = 0;
+        uint256 backflowLocal = 0;
         while (cur != address(0) && depth < 100) {
             if (curRefAmount < 1) break;
             uint256 nextAmount = (curRefAmount * 5000) / 10000;
@@ -894,8 +895,14 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
             }
 
             if (netAmount >= 1) {
-                refReward_map[cur] += netAmount;
-                emit RefCredit(cur, netAmount, orderId);
+                // 仅当推荐人有活跃订单（activeOrders>0）时分配推荐奖励
+                if (activeOrders[cur] > 0) {
+                    refReward_map[cur] += netAmount;
+                    emit RefCredit(cur, netAmount, orderId);
+                } else {
+                    // 推荐人无活跃订单：这部分记入回流，稍后回流到 _totalSupply
+                    backflowLocal += netAmount;
+                }
             }
 
             address next = IRelation(relShip).getInviter(cur);
@@ -904,10 +911,14 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
             if (curRefAmount == 0) break;
         }
 
+        // 把未分配（包括链中未消费部分 curRefAmount 与因推荐人无活跃订单而累积的 backflowLocal）回流到 _totalSupply
         if (curRefAmount > 0) {
-            _totalSupply += curRefAmount;
-            emit RefBackflow(orderId, curRefAmount);
+            backflowLocal += curRefAmount;
             curRefAmount = 0;
+        }
+        if (backflowLocal > 0) {
+            _totalSupply += backflowLocal;
+            emit RefBackflow(orderId, backflowLocal);
         }
 
         uint256 reserved = (orderRatio * 2500) / 10000;
