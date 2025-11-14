@@ -628,21 +628,19 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         }
 
         // 若目标等级与旧等级不同，执行变更：同步订单并调整 levelActiveSupply
-        bool hadActive = false;
         for (uint256 i = 0; i < userOrders[a].length; i++) {
             Order storage o = orders[userOrders[a][i]];
             if (!o.isOut) {
                 o.level = target;
-                hadActive = true;
             }
         }
 
-        // 调整 levelActiveSupply 计数：先减旧等级（如果存在），再增新等级（如果有活跃订单）
+        // 调整 levelActiveSupply 计数：无论用户是否有活跃订单，只要等级发生变化就更新计数
         if (oldLevel > 0 && levelActiveSupply[oldLevel] > 0) {
             levelActiveSupply[oldLevel]--;
         }
-        if (hadActive) {
-            if (levelActiveSupply[target] < type(uint8).max) levelActiveSupply[target]++;
+        if (levelActiveSupply[target] < type(uint8).max) {
+            levelActiveSupply[target]++;
         }
 
         // 更新用户在该等级的快照，避免历史分配重放
@@ -917,7 +915,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         else ownerPort = 0;
     }
 
-    // 消耗超额逻辑：优先从 refReward_map[user] 扣除，剩余按 queue/ownerPort 比例扣除并回流到 _totalSupply。
+
     // 返回值为本订单实际由 queue 支付的数量（DINO 单位）。
     function _consumeExcessAndComputePaidFromQueue(
         uint256 qQueue,
@@ -958,7 +956,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         }
     }
 
-    // 处理单笔订单的结算逻辑，返回本笔订单实际支付给用户的 DINO 数量（payout）
+
     // 以及本笔订单中实际由 queue 支付的量（paidFromQueue），用于汇总日志
     function _claimOrder(uint256 id, address user, RewardType rtype) internal returns (uint256 payout, uint256 paidFromQueue) {
         Order storage ord = orders[id];
@@ -988,10 +986,13 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
 
             paidFromQueue = _consumeExcessAndComputePaidFromQueue(qQueue, ownerPort, tempExcess, user);
 
+
             ord.stake.received = maxValue;
             _propagateSubtreeDelta(ord.account, -int256(ord.stake.value));
             ord.isOut = true;
-            if (--activeOrders[ord.account] == 0) totalActiveUsers--;
+            if (--activeOrders[ord.account] == 0) {
+                totalActiveUsers--;
+            }
 
             payout = allowDino;
         } else {
@@ -1441,4 +1442,6 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
             index++;
         }
     }
+
+
 }
