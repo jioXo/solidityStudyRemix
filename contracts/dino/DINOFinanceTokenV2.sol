@@ -132,7 +132,8 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
     // 1 = 比例分配总金额  distributeRatioReward
     // 2 = 用户领取级别奖励 getLevelReward
     // 3 = 新池分配总金额 distributeLevelReward
-    // 4 =为指定用户结算并（根据类型）支付奖励 _claimRewards
+    // 4 = 为指定用户结算并（根据类型）支付奖励 _claimRewards（总体 payout）
+    // 5 = 为指定用户结算时单独记录“排队奖”支付部分 _claimRewards（queue 部分）
 
 
     function _pushAccountLog(
@@ -473,131 +474,19 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         }
 
         uint256 actualPayout = 0;
+        // 本次领取中实际由排队奖支付的累计量（DINO 单位），用于统一写入日志
+        uint256 totalQueuePaid = 0;
 
         for (uint256 i = 0; i < ids.length; i++) {
-            Order storage ord = orders[ids[i]];
+            uint256 id = ids[i];
+            Order storage ord = orders[id];
             if (ord.isOut) continue;
 
-            // 直接计算 pending，不定义任何中间变量
-            // 对于 Main 类型：不在分发阶段预先给上级推荐奖，而是在领取时再分配推荐奖。
-            // 因此在这里我们把 ord.rewards.ratio 拆分为两部分：一部分分配给上级（累加到 refReward_map），
-            // 另一部分归属于订单所有者（ownerPort）。随后 ownerPort 与 queue + refReward_map[user] 一并作为 pending 发放。
-            uint256 ownerPort = 0;
-            uint256 pending = 0;
-            if (rtype == RewardType.Main) {
-                uint256 orderRatio = ord.rewards.ratio;
-                if (orderRatio > 0) {
-                    uint256 distributedRef = 0;
-                    // 第一级理论预留份额为 25%（保留给邀请链）
-                    uint256 curRefAmount = (orderRatio * 2500) / 10000; // 25%
-                    address cur = IRelation(relShip).getInviter(ord.account);
-
-                    uint256 depth = 0;
-                    // MAX_REF_DEPTH = 100, MIN_REF_REWARD = 1 (写死)
-                    while (cur != address(0) && depth < 100) {
-                        if (curRefAmount < 1) break;
-                        uint256 nextAmount = (curRefAmount * 5000) / 10000;
-                        uint256 netAmount;
-                        if (nextAmount < 1) {
-                            netAmount = curRefAmount;
-                            curRefAmount = 0;
-                        } else {
-                            netAmount = curRefAmount - nextAmount;
-                            curRefAmount = nextAmount;
-                        }
-
-                        if (netAmount >= 1) {
-                            refReward_map[cur] += netAmount;
-                            distributedRef += netAmount;
-                            // Emit an event so on-chain observers can see referral credits
-                            emit RefCredit(cur, netAmount, ids[i]);
-                        }
-
-                        address next = IRelation(relShip).getInviter(cur);
-                        cur = next;
-                        depth++;
-                        if (curRefAmount == 0) break;
-                    }
-
-                    // 当邀请链遍历结束后，若仍有未被分配的预留份额（curRefAmount > 0），
-                    // 按新规则这些未分配的邀请链份额应回流到 `_totalSupply`，而不是归于订单所有者。
-                    if (curRefAmount > 0) {
-                        _totalSupply += curRefAmount;
-                        emit RefBackflow(ids[i], curRefAmount);
-                        // 未分配部分已回流，curRefAmount 清零以防误用
-                        curRefAmount = 0;
-                    }
-
-                    // 订单所有者实际应得的比例奖部分 = 总比例奖 - 为邀请链预留的份额(25%)
-                    uint256 reserved = (orderRatio * 2500) / 10000;
-                    if (orderRatio > reserved) ownerPort = orderRatio - reserved;
-                    else ownerPort = 0;
-                }
-
-                pending = ord.rewards.queue + ownerPort + refReward_map[user];
-            } else {
-                pending = ord.rewards.level + ord.rewards.reward30 + ord.rewards.reward70;
-            }
-
-            if (pending == 0) continue;
-
-            // 重置奖励（直接操作状态）
-            if (rtype == RewardType.Main) {
-                ord.rewards.queue = 0;
-                // 已把 ord.rewards.ratio 中分配给上级的部分累加到 refReward_map，上级会在各自的 claim 时领取。
-                // 这里把订单的比例奖清零（ownerPort 已单独计算并包含在 pending）。
-                ord.rewards.ratio = 0;
-            } else {
-                ord.rewards.level = 0;
-                ord.rewards.reward30 = 0;
-                ord.rewards.reward70 = 0;
-            }
-
-            // 仅保留 2 个必要局部变量，其余直接计算
-            uint256 maxValue = ord.stake.value * outMultiple;
-            uint256 pendingValue = calculateTokenToValue(pending);
-
-            if (ord.stake.received + pendingValue > maxValue) {
-                // 直接计算允许领取的 DINO 数量，无中间变量
-                uint256 allowDino = calculateValueToToken(
-                    maxValue - ord.stake.received
-                );
-                // 如果 pending > allowDino 表示存在超额，需要把超额部分回流到 _totalSupply
-                if (pending > allowDino) {
-                    uint256 tempExcess = pending - allowDino;
-                    _totalSupply += tempExcess;
-                    if (rtype == RewardType.Main) {
-                        if (refReward_map[user] > 0) {
-                            if (tempExcess >= refReward_map[user]) {
-                                refReward_map[user] = 0;
-                            } else {
-                                refReward_map[user] = refReward_map[user] - tempExcess;
-                            }
-                        }
-                    }
-
-                    ord.stake.received = maxValue;
-                    // 订单出局：移除其价值对自己和祖先的贡献
-                    _propagateSubtreeDelta(ord.account, -int256(ord.stake.value));
-                    ord.isOut = true;
-                    if (--activeOrders[ord.account] == 0) totalActiveUsers--;
-                    actualPayout += allowDino;
-                } else {
-                    // allowDino >= pending：直接支付 pending（无 excess）
-                    ord.stake.received = maxValue;
-                    _propagateSubtreeDelta(ord.account, -int256(ord.stake.value));
-                    ord.isOut = true;
-                    if (--activeOrders[ord.account] == 0) totalActiveUsers--;
-                    actualPayout += pending;
-                }
-            } else {
-                ord.stake.received += pendingValue;
-                actualPayout += pending;
-                // 直接重置状态变量
-                if (rtype == RewardType.Main) {
-                    refReward_map[user] = 0;
-                }
-            }
+            // 把单笔订单的核算逻辑抽到单独函数，减少本函数局部变量使用，避免 stack too deep
+            (uint256 payoutForOrder, uint256 paidFromQueueThisOrder) = _claimOrder(id, user, rtype);
+            if (payoutForOrder == 0 && paidFromQueueThisOrder == 0) continue;
+            actualPayout += payoutForOrder;
+            totalQueuePaid += paidFromQueueThisOrder;
         }
 
         if (actualPayout == 0) {
@@ -631,6 +520,11 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         emit RewardPaid(user, actualPayout);
         // record log for main payout
         _pushAccountLog(user, actualPayout, 4);
+
+        // 记录本次领取中来自排队奖的部分（单独一条日志，来源码 5）
+        if (totalQueuePaid > 0) {
+            _pushAccountLog(user, totalQueuePaid, 5);
+        }
 
         return actualPayout;
     }
@@ -980,6 +874,146 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
             cur = next;
             depth++;
         }
+    }
+
+    // 将原本在 _claimRewards 中的邀请链分发逻辑抽到此处，返回订单所有者实际应得的 ownerPort（DINO 单位）
+    function _distributeReferral(uint256 orderRatio, uint256 orderId, address account) internal returns (uint256 ownerPort) {
+        if (orderRatio == 0) return 0;
+
+        uint256 curRefAmount = (orderRatio * 2500) / 10000; // 25% reserved for referral chain
+        address cur = IRelation(relShip).getInviter(account);
+        uint256 depth = 0;
+        while (cur != address(0) && depth < 100) {
+            if (curRefAmount < 1) break;
+            uint256 nextAmount = (curRefAmount * 5000) / 10000;
+            uint256 netAmount;
+            if (nextAmount < 1) {
+                netAmount = curRefAmount;
+                curRefAmount = 0;
+            } else {
+                netAmount = curRefAmount - nextAmount;
+                curRefAmount = nextAmount;
+            }
+
+            if (netAmount >= 1) {
+                refReward_map[cur] += netAmount;
+                emit RefCredit(cur, netAmount, orderId);
+            }
+
+            address next = IRelation(relShip).getInviter(cur);
+            cur = next;
+            depth++;
+            if (curRefAmount == 0) break;
+        }
+
+        if (curRefAmount > 0) {
+            _totalSupply += curRefAmount;
+            emit RefBackflow(orderId, curRefAmount);
+            curRefAmount = 0;
+        }
+
+        uint256 reserved = (orderRatio * 2500) / 10000;
+        if (orderRatio > reserved) ownerPort = orderRatio - reserved;
+        else ownerPort = 0;
+    }
+
+    // 消耗超额逻辑：优先从 refReward_map[user] 扣除，剩余按 queue/ownerPort 比例扣除并回流到 _totalSupply。
+    // 返回值为本订单实际由 queue 支付的数量（DINO 单位）。
+    function _consumeExcessAndComputePaidFromQueue(
+        uint256 qQueue,
+        uint256 ownerPort,
+        uint256 tempExcess,
+        address user
+    ) internal returns (uint256 paidFromQueue) {
+        if (tempExcess == 0) {
+            return qQueue; // 没有要扣减的，queue 全额支付
+        }
+
+        uint256 refBal = refReward_map[user];
+        if (refBal > 0) {
+            if (tempExcess >= refBal) {
+                tempExcess -= refBal;
+                refReward_map[user] = 0;
+            } else {
+                refReward_map[user] = refBal - tempExcess;
+                tempExcess = 0;
+            }
+        }
+
+        if (tempExcess == 0) {
+            return qQueue; // ref 扣除后无超额，queue 未被扣减
+        }
+
+        uint256 sumQR = qQueue + ownerPort;
+        if (sumQR > 0) {
+            uint256 deductQ = (qQueue * tempExcess) / sumQR;
+            uint256 deductR = tempExcess - deductQ;
+            _totalSupply += (deductQ + deductR);
+            if (qQueue > deductQ) paidFromQueue = qQueue - deductQ;
+            else paidFromQueue = 0;
+        } else {
+            // 没有 queue 与 ownerPort，则直接回流剩余
+            _totalSupply += tempExcess;
+            paidFromQueue = 0;
+        }
+    }
+
+    // 处理单笔订单的结算逻辑，返回本笔订单实际支付给用户的 DINO 数量（payout）
+    // 以及本笔订单中实际由 queue 支付的量（paidFromQueue），用于汇总日志
+    function _claimOrder(uint256 id, address user, RewardType rtype) internal returns (uint256 payout, uint256 paidFromQueue) {
+        Order storage ord = orders[id];
+        if (ord.isOut) return (0, 0);
+
+        uint256 ownerPort = 0;
+        uint256 pending = 0;
+        if (rtype == RewardType.Main) {
+            uint256 orderRatio = ord.rewards.ratio;
+            if (orderRatio > 0) {
+                ownerPort = _distributeReferral(orderRatio, id, ord.account);
+            }
+            pending = ord.rewards.queue + ownerPort + refReward_map[user];
+        } else {
+            pending = ord.rewards.level + ord.rewards.reward30 + ord.rewards.reward70;
+        }
+
+        if (pending == 0) return (0, 0);
+
+        uint256 qQueue = ord.rewards.queue;
+        uint256 maxValue = ord.stake.value * outMultiple;
+        uint256 pendingValue = calculateTokenToValue(pending);
+
+        if (ord.stake.received + pendingValue > maxValue) {
+            uint256 allowDino = calculateValueToToken(maxValue - ord.stake.received);
+            uint256 tempExcess = pending - allowDino;
+
+            paidFromQueue = _consumeExcessAndComputePaidFromQueue(qQueue, ownerPort, tempExcess, user);
+
+            ord.stake.received = maxValue;
+            _propagateSubtreeDelta(ord.account, -int256(ord.stake.value));
+            ord.isOut = true;
+            if (--activeOrders[ord.account] == 0) totalActiveUsers--;
+
+            payout = allowDino;
+        } else {
+            ord.stake.received += pendingValue;
+            payout = pending;
+            if (rtype == RewardType.Main) {
+                if (refReward_map[user] > 0) refReward_map[user] = 0;
+                paidFromQueue = qQueue;
+            }
+        }
+
+        // 重置奖励槽
+        if (rtype == RewardType.Main) {
+            ord.rewards.queue = 0;
+            ord.rewards.ratio = 0;
+        } else {
+            ord.rewards.level = 0;
+            ord.rewards.reward30 = 0;
+            ord.rewards.reward70 = 0;
+        }
+
+        return (payout, paidFromQueue);
     }
 
 
