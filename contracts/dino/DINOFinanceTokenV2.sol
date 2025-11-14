@@ -1092,27 +1092,31 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
                 uint256 userActiveCount = activeOrders[acct];
                 if (userActiveCount == 0) continue;
 
-                // 将单个用户的份额按其活跃订单均分
-                uint256 perOrder = perUser / userActiveCount;
-                uint256 distributed = 0;
+                // 新策略：按订单时间（最早订单优先）分配，优先把每笔订单分配到其 cap（maxValue）
+                uint256 remainingUser = perUser;
                 for (uint256 j = 0; j < userOrders[acct].length; j++) {
+                    if (remainingUser == 0) break;
                     Order storage o = orders[userOrders[acct][j]];
-                    if (!o.isOut) {
-                        o.rewards.level += perOrder;
-                        distributed += perOrder;
-                    }
+                    if (o.isOut) continue;
+
+                    // 每笔订单的上限（USDT 单位）
+                    uint256 maxValue = o.stake.value * outMultiple;
+                    // 剩余可领取价值（USDT 单位）
+                    uint256 remainValue = maxValue > o.stake.received ? maxValue - o.stake.received : 0;
+                    if (remainValue == 0) continue;
+
+                    // 把 remainValue（USDT）转换为可领取的 DINO 数量
+                    uint256 allowDino = calculateValueToToken(remainValue);
+                    if (allowDino == 0) continue;
+
+                    uint256 give = allowDino <= remainingUser ? allowDino : remainingUser;
+                    o.rewards.level += give;
+                    remainingUser -= give;
                 }
 
-                // 处理除法产生的舍入残差：把剩余加到第一个活跃订单
-                if (perUser > distributed) {
-                    uint256 leftover = perUser - distributed;
-                    for (uint256 j = 0; j < userOrders[acct].length; j++) {
-                        Order storage o2 = orders[userOrders[acct][j]];
-                        if (!o2.isOut) {
-                            o2.rewards.level += leftover;
-                            break;
-                        }
-                    }
+                // 如果该用户所有订单已满仍有余额，回流到 _totalSupply（以便未来分配）
+                if (remainingUser > 0) {
+                    _totalSupply += remainingUser;
                 }
             }
             // 本等级的奖励已分配，清零 avoid double-distribution
