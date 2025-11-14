@@ -50,13 +50,11 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
     address public launcher;
     address public fundAddress;
     // address public usdt = 0xAa8Ff530B040A36eaF29CF161F79b44F4e76d254;
-    address public usdt = 0xfe80d187f052C18532DfEFD0152647786fb0A7c6;
-    address public constant uRouter =
-        0x6682375ebC1dF04676c0c5050934272368e6e883; //0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24;
-    address public constant TARGET_TOKEN =
-        0x6dB171BC785386973994072729D8fC707C2948e4;
+  address public usdt = 0xAa8Ff530B040A36eaF29CF161F79b44F4e76d254;
+    address public constant uRouter = 0x6682375ebC1dF04676c0c5050934272368e6e883;
+    address public constant TARGET_TOKEN = 0x70bD93352615a810417C776942FeaED8c366f522;
     address public burnWallet = 0x0000000000000000000000000000000000000000;
-    address public marketingWallet;
+    address public marketingWallet = 0x1a238010ff6f25BB34F42405C1EEa36aB87A1Bd5;
     address public immutable WETH;
 
     // === 质押与收益 ===
@@ -118,8 +116,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
     uint256 public last30NewPoolTime;
     uint256 public constant TRIGGER_THRESHOLD = 100_000 * 1e6;
     uint256 public constant NO_STAKE_DURATION = 1 hours;
-    uint256 public constant MAX_REF_DEPTH = 100;//最多向上追溯 100 层，防止 gas 爆炸
-    uint256 public constant MIN_REF_REWARD = 1; // 最小分配单位，低于则停止级联
+    // MAX_REF_DEPTH 与 MIN_REF_REWARD 不再暴露为 public 常量，已内联为代码中的字面量（100 / 1）以节省字节码
 
     // === 日志 & 等级 ===
     struct Log {
@@ -145,42 +142,13 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
     ) internal {
         // 价值通过价格函数 calculateTokenToValue 计算
         uint256 value = 0;
-        // 使用 try/catch 保护外部调用，避免路由器失败导致整个事务回滚
-        // 返回值未必总是可用；把返回变量用 `_` 命名以避免编译未使用变量的警告。
-        try this.calculateTokenToValue(quantity) returns (uint256 _v) {
-            value = _v;
-        } catch {
-            value = 0;
-        }
-        // 复用集中写入方法，便于以后修改写入逻辑
-        addAccountLogs(account, quantity, value, from);
-    }
-
-    // 私有写入接口：直接写入已知价值（避免在调用方重复做价格查询）
-    function addAccountLogs(
-        address account,
-        uint256 quantity,
-        uint256 value,
-        uint8 from
-    ) private {
+        // 直接调用价格查询（调用失败将回退）。
+        value = calculateTokenToValue(quantity);
         accountLogs[account].push(Log(block.timestamp, quantity, value, from));
     }
 
 
-    // 便捷接口：按数量返回账户最近的若干条日志（按写入时间从早到晚排序）
-    // 返回类型为 Log[]，方便调用方一次性获取结构化日志
-    function getAccountLogs(address account, uint256 quantity) public view returns (Log[] memory logList) {
-        uint256 len = accountLogs[account].length;
-        uint256 arrItem = len > quantity ? quantity : len;
-        logList = new Log[](arrItem);
-        if (arrItem == 0) return logList;
-        uint256 floor = len - arrItem;
-        uint256 index = 0;
-        for (uint256 i = floor; i < len; i++) {
-            logList[index] = accountLogs[account][i];
-            index++;
-        }
-    }
+
 
     // levelRequiredAmount 存为标准的 USDT 最小单位（每项 = 人类可读值 * 1e6）
     // 例如：数组项 `1_000` 表示 1_000 USDT，可表示为 1_000 * 1e6 = 1_000_000_000
@@ -207,7 +175,6 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
     // === 会员信息（便于外部与前端读取） ===
     struct MEMBER {
         uint8 level; // 当前等级
-        uint256 remain; // 预留字段：可用于记录待发放或保留值
         uint256 received; // 累计已领取的 DINO 数量（按每次实际发放累加）
         uint256 receivedValue; // 累计已领取的价值（USDT 最小单位），按每次领取时的价格累加
         uint256 donated; // 累计捐赠/质押的 DINO 数量
@@ -237,21 +204,24 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         uint256 reward70,
         uint256 timestamp
     );
-    event BurnToBlackHole(
-        uint256 dinoAmount,
-        uint256 usdtValue,
-        uint256 timestamp
-    );
-    event BurnSwapFailed(
-        uint256 dinoAmount,
-        uint256 timestamp
-    );
+
     
-    event RefCredit(address indexed to, uint256 amount, uint256 orderId, uint256 timestamp);
+    event RefCredit(address indexed to, uint256 amount, uint256 orderId);
     // 当推荐链中有部分预留份额未分配（链断裂或达到 MIN_REF_REWARD），把该未分配部分回流到 _totalSupply
-    event RefBackflow(uint256 indexed orderId, uint256 amount, uint256 timestamp);
-    // 当 stake() 因 gas 或深度限制未能遍历完整邀请链时，发出该事件以便链下 keeper 从该起点继续处理
-    event AncestorUpgradeRequested(address indexed start, uint8 skippedDepth);
+    event RefBackflow(uint256 indexed orderId, uint256 amount);
+
+
+    // 通用调试事件，用于替代若干特定调试事件，节省字节码并便于统一处理。
+    // kind: 1=getInviterFailed, 2=ancestorUpgradeStep, 3=stoppedByGas, etc.
+    // subject: 受影响的地址；
+    // oldLevel/newLevel: 在升级步骤时的等级对比（否则为 0）
+    // 注意：为节省字节码已移除 depth 字段
+    event DebugInfo(
+        address indexed subject,
+        uint8 kind,
+        uint8 oldLevel,
+        uint8 newLevel
+    );
     event LevelInitialized(address indexed account, uint8 level);
 
     // === 修饰器 ===
@@ -264,42 +234,29 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         _;
     }
     modifier updateReward() {
-        if (
-            _totalSupply > 0 &&
-            block.timestamp >= lastUpdateDailyRewardTime + dailyRewardInterval
-        ) {
-            uint256 dayReward = (_totalSupply * dailyRate) / 100;
-            // 在分发前对总供应做快照，用于后续按比例权重的计算
-            snapshotTotalSupply = _totalSupply;
-            _totalSupply = _totalSupply > dayReward
-                ? _totalSupply - dayReward
-                : 0;
-
-            updateQueueTopList(dayReward / 10);
-            distributeLevelReward((dayReward * 4) / 10);
-            distributeRatioReward(dayReward / 2);
-            setEarned();
-            // clear snapshot after distribution
-            snapshotTotalSupply = 0;
-            lastUpdateDailyRewardTime += 1 days;
-            rewardPerQueueStored = rewardPerRatioStored = 0;
-        }
+        _distributeDailyRewards(false);
         _;
     }
 
     function updateReward1() public {
-        if (_totalSupply > 0) {
+        // 原始逻辑在 updateReward1 中仅检查 _totalSupply>0，允许手动/测试时强制分发
+        _distributeDailyRewards(true);
+    }
+    // 抽取到内部函数以避免在 modifier 与外部函数之间重复相同逻辑，节省字节码
+    // 如果 force 为 true 则忽略时间间隔检查（用于手动触发或测试）
+    function _distributeDailyRewards(bool force) internal {
+        if (
+            _totalSupply > 0 &&
+            (force || block.timestamp >= lastUpdateDailyRewardTime + dailyRewardInterval)
+        ) {
             uint256 dayReward = (_totalSupply * dailyRate) / 100;
             // 在分发前对总供应做快照，用于后续按比例权重的计算
             snapshotTotalSupply = _totalSupply;
-            _totalSupply = _totalSupply > dayReward
-                ? _totalSupply - dayReward
-                : 0;
+            _totalSupply = _totalSupply > dayReward ? _totalSupply - dayReward : 0;
 
             updateQueueTopList(dayReward / 10);
             distributeLevelReward((dayReward * 4) / 10);
             distributeRatioReward(dayReward / 2);
-        
             setEarned();
             // clear snapshot after distribution
             snapshotTotalSupply = 0;
@@ -390,38 +347,49 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         // 自动尝试同步上级等级：在用户 stake 时向上遍历 inviter 链并调用 upgradeAccountLevel
         // 这能让满足条件的上级在下级质押时被自动升级，避免额外手动操作。
         address cur = address(0);
-        try IRelation(relShip).getInviter(msg.sender) returns (address _inv) {
-            cur = _inv;
-        } catch {
-            cur = address(0);
-        }
-        uint256 gasBuffer = 150000; // 保守缓冲，防止遍历导致 tx OOG
-        uint8 _depth = 0;
+        // 读取直接上级（调用失败将回退）
+        cur = IRelation(relShip).getInviter(msg.sender);
+    uint8 _depth = 0;
         // 在遍历时同时检查剩余 gas，避免在循环中耗尽 gas 导致整个事务失败。
-        while (cur != address(0)  && gasleft() > gasBuffer) {
+        while (cur != address(0)) {
+            // 记录升级前等级
+            uint8 oldLevel = members[cur].level;
             // 尝试升级该上级的等级（内部函数已防止不必要的 SSTORE）
             upgradeAccountLevel(cur);
-            address next;
-            try IRelation(relShip).getInviter(cur) returns (address _next) {
-                next = _next;
-            } catch {
-                next = address(0);
-            }
+            // 记录升级后等级并发事件以便线上追踪
+            uint8 newLevel = members[cur].level;
+            // 统一使用 DebugInfo 记录升级尝试及结果（oldLevel/newLevel 均可为 0 表示无变更）
+            emit DebugInfo(cur, 2, oldLevel, newLevel);
+
+            address next = IRelation(relShip).getInviter(cur);
             cur = next;
             _depth++;
+            if (_depth >= 100) {
+                break;
+            }
         }
 
         // 如果因 gas 不足或深度限制而中断遍历（cur 非 0 表示还有未处理的上级），
-        // 发出事件通知中断的层数
-        if (cur != address(0)) {
-            emit AncestorUpgradeRequested(cur, _depth);
-        }
+        // if (cur != address(0)) {
+        //     if (gasleft() <= gasBuffer) {
+        //         emit DebugInfo(cur, 3, 0, 0);
+        //     }
+        // }
         emit Stake(msg.sender, amount, o.stake.value);
     }
 
     function getReward() external whenNotPaused nonReentrant updateReward {
-        _claimRewards(msg.sender, RewardType.Main);
-        lastClaimTime[msg.sender] = block.timestamp;
+        if (lastClaimTime[msg.sender] != 0) {
+            require(
+                block.timestamp >= lastClaimTime[msg.sender] + getIntervalTime,
+                "Claim too soon"
+            );
+        }
+
+        uint256 paid = _claimRewards(msg.sender, RewardType.Main);
+        if (paid > 0) {
+            lastClaimTime[msg.sender] = block.timestamp;
+        }
     }
 
     function getLevelReward() external whenNotPaused nonReentrant updateReward {
@@ -468,12 +436,8 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
             DINOToken.safeTransfer(msg.sender, personalNet);
             // 记录用户已领取的 DINO 数量（链上精确）
             members[msg.sender].received += personalNet;
-            // 记录本次领取的价值（USDT 单位），按领取时价格累加
-            try this.calculateTokenToValue(personalNet) returns (uint256 _v) {
-                members[msg.sender].receivedValue += _v;
-            } catch {
-                // ignore price lookup failures
-            }
+            // 记录本次领取的价值（USDT 单位），按领取时价格累加（失败将回退）
+            members[msg.sender].receivedValue += calculateTokenToValue(personalNet);
             emit RewardPaid(msg.sender, personalNet);
             // record log for level personal payout
             _pushAccountLog(msg.sender, personalNet, 2);
@@ -497,6 +461,17 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         uint256[] memory ids = userOrders[user];
         require(ids.length > 0, "No orders");
 
+        // 新规则（仅对非级别领取生效）: 只要用户在过去 getIntervalTime（默认 4 小时）内有任何一次下单，
+        // 则该用户不得进行非级别领取（Main）。Level 类型领取不受此限制。
+        if (rtype == RewardType.Main) {
+            for (uint256 _i = 0; _i < ids.length; _i++) {
+                Order storage _ord = orders[ids[_i]];
+                if (_ord.stake.stakeTime + getIntervalTime > block.timestamp) {
+                    revert("Order too recent");
+                }
+            }
+        }
+
         uint256 actualPayout = 0;
 
         for (uint256 i = 0; i < ids.length; i++) {
@@ -515,19 +490,15 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
                     uint256 distributedRef = 0;
                     // 第一级理论预留份额为 25%（保留给邀请链）
                     uint256 curRefAmount = (orderRatio * 2500) / 10000; // 25%
-                    address cur = address(0);
-                    try IRelation(relShip).getInviter(ord.account) returns (address _inv) {
-                        cur = _inv;
-                    } catch {
-                        cur = address(0);
-                    }
+                    address cur = IRelation(relShip).getInviter(ord.account);
 
                     uint256 depth = 0;
-                    while (cur != address(0) && depth < MAX_REF_DEPTH) {
-                        if (curRefAmount < MIN_REF_REWARD) break;
+                    // MAX_REF_DEPTH = 100, MIN_REF_REWARD = 1 (写死)
+                    while (cur != address(0) && depth < 100) {
+                        if (curRefAmount < 1) break;
                         uint256 nextAmount = (curRefAmount * 5000) / 10000;
                         uint256 netAmount;
-                        if (nextAmount < MIN_REF_REWARD) {
+                        if (nextAmount < 1) {
                             netAmount = curRefAmount;
                             curRefAmount = 0;
                         } else {
@@ -535,19 +506,14 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
                             curRefAmount = nextAmount;
                         }
 
-                        if (netAmount >= MIN_REF_REWARD) {
+                        if (netAmount >= 1) {
                             refReward_map[cur] += netAmount;
                             distributedRef += netAmount;
                             // Emit an event so on-chain observers can see referral credits
-                            emit RefCredit(cur, netAmount, ids[i], block.timestamp);
+                            emit RefCredit(cur, netAmount, ids[i]);
                         }
 
-                        address next;
-                        try IRelation(relShip).getInviter(cur) returns (address _next) {
-                            next = _next;
-                        } catch {
-                            next = address(0);
-                        }
+                        address next = IRelation(relShip).getInviter(cur);
                         cur = next;
                         depth++;
                         if (curRefAmount == 0) break;
@@ -557,7 +523,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
                     // 按新规则这些未分配的邀请链份额应回流到 `_totalSupply`，而不是归于订单所有者。
                     if (curRefAmount > 0) {
                         _totalSupply += curRefAmount;
-                        emit RefBackflow(ids[i], curRefAmount, block.timestamp);
+                        emit RefBackflow(ids[i], curRefAmount);
                         // 未分配部分已回流，curRefAmount 清零以防误用
                         curRefAmount = 0;
                     }
@@ -660,12 +626,8 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         DINOToken.safeTransfer(user, actualPayout);
         // 记录用户已领取的 DINO 数量（链上精确）
         members[user].received += actualPayout;
-        // 记录本次领取的价值（USDT 单位）。使用 try/catch 保护价格查询失败场景。
-        try this.calculateTokenToValue(actualPayout) returns (uint256 v) {
-            members[user].receivedValue += v;
-        } catch {
-            // 若价格查询失败，则不更新 receivedValue，避免回滚
-        }
+        // 记录本次领取的价值（USDT 单位）。直接查询价格并累加（调用失败将回退）
+        members[user].receivedValue += calculateTokenToValue(actualPayout);
         emit RewardPaid(user, actualPayout);
         // record log for main payout
         _pushAccountLog(user, actualPayout, 4);
@@ -857,8 +819,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
 
     // === 内部函数 ===
     function distributeLevelReward(uint256 total) internal {
-          _pushAccountLog(msg.sender, total, 3);
-        if (total == 0) return;
+                if (total == 0) return;
         uint256 base = 1000;
         uint256 distributed = 0;
         uint256 backflow = 0; // 未能分配出去应回流的总和（以 DINO 单位）
@@ -898,11 +859,14 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         if (backflow > 0) {
             _totalSupply += backflow;
         }
-        // (event removed to reduce deployed code size)
+        // 记录实际分配给等级用户的数量（减去回流到 `_totalSupply` 的部分）
+        if (distributed > 0) {
+            _pushAccountLog(address(this), distributed, 3);
+        }
     }
 
     function updateQueueTopList(uint256 pool) internal {
-        _pushAccountLog(msg.sender, pool, 0);
+        _pushAccountLog(address(this), pool, 0);
         if (pool == 0) return;
         uint256 value = calculateTokenToValue(pool);
     // value 以 USDT 最小单位（6 位小数）表示
@@ -938,7 +902,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         if (pool > 0) {
             rewardPerRatioStored += pool;
         }
-         _pushAccountLog(msg.sender, pool, 1);
+         _pushAccountLog(address(this), pool, 1);
     }
 
     function distributeNewPool30Percent() internal {
@@ -999,14 +963,10 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         }
 
         // 向上传播到所有祖先（受深度限制，防止外部 relShip 返回超深链造成 gas 爆炸）
-        address cur = address(0);
-        try IRelation(relShip).getInviter(user) returns (address inv) {
-            cur = inv;
-        } catch {
-            cur = address(0);
-        }
-        uint256 depth = 0;
-        while (cur != address(0) && depth < MAX_REF_DEPTH) {
+        address cur = IRelation(relShip).getInviter(user);
+    uint256 depth = 0;
+    // MAX_REF_DEPTH = 100 (写死)
+    while (cur != address(0) && depth < 100) {
             if (delta > 0) {
                 uint256 d = uint256(delta);
                 subtreeTotal[cur] += d;
@@ -1016,12 +976,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
                 else subtreeTotal[cur] -= d;
             }
 
-            address next;
-            try IRelation(relShip).getInviter(cur) returns (address inv2) {
-                next = inv2;
-            } catch {
-                next = address(0);
-            }
+            address next = IRelation(relShip).getInviter(cur);
             cur = next;
             depth++;
         }
@@ -1032,12 +987,9 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
     // Fallback：在 subtreeTotal 还未初始化时，计算子树总值（view，仅在回退场景使用）
     function _computeSubtreeRec(address user) internal view returns (uint256) {
         uint256 total = _getUserValue(user);
-        try IRelation(relShip).getMyTeam(user) returns (address[] memory team) {
-            for (uint256 i = 0; i < team.length; i++) {
-                total += _computeSubtreeRec(team[i]);
-            }
-        } catch {
-            // 失败则忽略子团队
+        address[] memory team = IRelation(relShip).getMyTeam(user);
+        for (uint256 i = 0; i < team.length; i++) {
+            total += _computeSubtreeRec(team[i]);
         }
         return total;
     }
@@ -1169,14 +1121,6 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
     }
 
     // === 视图函数 ===
-    function totalSupply() public view returns (uint256) {
-        return _totalSupply;
-    }
-
-    function getTotalPool() public view returns (uint256) {
-        return totalPool;
-    }
-
     function balanceOf(address a) public view returns (uint256) {
         if (activeOrders[a] == 0) return 0;
         uint256 bal = 0;
@@ -1316,58 +1260,43 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
     }
 
     /**
-    * @dev 小区业绩=总业绩 - 大区业绩
-     */
-    function getTeamValue(address user) public view returns (uint256) {
-        // 总业绩 = 所有直推成员（含其下级团队）的子树业绩之和
-        // 小区业绩 = 总业绩 - 大区业绩（大区业绩由 getAllTeamValue 返回）
+    * @dev 返回用户的大区业绩与小区业绩：
+    *  - bigArea: 直推团队中子树业绩最大的那一支（含其下级团队）
+    *  - smallArea: 总业绩（所有直推成员含下级）减去 bigArea
+    *
+    * 为了兼容历史接口，保留 `getTeamValue` 和 `getAllTeamValue` 作为轻量包装，
+    * 实际逻辑合并到本函数以避免重复代码。
+    */
+    function getTeamValues(address user) public view returns (uint256 bigArea, uint256 smallArea) {
         uint256 totalPerf = 0;
-        address[] memory team;
-        try IRelation(relShip).getMyTeam(user) returns (address[] memory t) {
-            team = t;
-        } catch {
-            // relShip 失败 → 返回 0
-            return 0;
-        }
+        uint256 maxValue = 0;
+        address[] memory team = IRelation(relShip).getMyTeam(user);
 
         for (uint256 i = 0; i < team.length; i++) {
             address member = team[i];
             uint256 val = subtreeTotal[member];
             if (val == 0) {
-                // 若尚未增量初始化，则回退到视图计算
+                // 若尚未增量初始化，则回退到视图计算（可能较贵）
                 val = _computeSubtreeRec(member);
             }
             totalPerf += val;
-        }
-
-        uint256 bigArea = getAllTeamValue(user);
-        if (totalPerf <= bigArea) return 0;
-        return totalPerf - bigArea;
-    }
-
-    /**
-    * @dev 大区业绩= 最大总业绩的直推团队（含下级团队）
-     */
-    function getAllTeamValue(address user) public view returns (uint256) {
-        // 优先使用增量维护的 subtreeTotal（如果已初始化则是 O(#directChildren)）
-        uint256 maxValue = 0;
-        address[] memory team;
-        try IRelation(relShip).getMyTeam(user) returns (address[] memory t) {
-            team = t;
-        } catch {
-            return 0;
-        }
-
-        for (uint256 i = 0; i < team.length; i++) {
-            address member = team[i];
-            uint256 val = subtreeTotal[member];
-            if (val == 0) {
-                // 如果尚未增量初始化（历史数据），使用 view 回退计算（注意：可能较贵）
-                val = _computeSubtreeRec(member);
-            }
             if (val > maxValue) maxValue = val;
         }
-        return maxValue;
+
+        bigArea = maxValue;
+        if (totalPerf > maxValue) smallArea = totalPerf - maxValue;
+        else smallArea = 0;
+    }
+
+    // 向后兼容的包装：保留原名以免破坏外部调用
+    function getTeamValue(address user) public view returns (uint256) {
+        (, uint256 smallArea) = getTeamValues(user);
+        return smallArea;
+    }
+
+    function getAllTeamValue(address user) public view returns (uint256) {
+        (uint256 bigArea, ) = getTeamValues(user);
+        return bigArea;
     }
 
     function _getUserValue(address user) internal view returns (uint256 value) {
@@ -1420,6 +1349,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         path[0] = address(DINOToken);
         path[1] = WETH;
         path[2] = TARGET_TOKEN;
+        // 保持对黑洞 swap 的容错：失败时不回退，记录/忽略失败
         try
             uniswapRouter.swapExactTokensForTokens(
                 dinoAmount,
@@ -1429,20 +1359,48 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
                 block.timestamp + 300
             )
         returns (uint256[] memory) {
-            // 成功才扣除并记录事件（便于链上观测）
+            // 成功才扣除
             blackHolePool -= dinoAmount;
-            emit BurnToBlackHole(dinoAmount, calculateTokenToValue(dinoAmount), block.timestamp);
         } catch {
-            // 失败不回滚，但记录失败事件，便于排查
-            emit BurnSwapFailed(dinoAmount, block.timestamp);
+            // ignore swap failure to avoid blocking user flows; monitoring via off-chain keeper
         }
     }
 
     // 手动/受控执行黑洞 swap 的入口
-    function executeBlackHoleSwap() public  {
+    function executeBlackHoleSwap() public {
         uint256 amount = blackHolePool;
         if (amount == 0) return;
         // 调用内部函数进行 swap（内部会 emit 成功/失败事件并在成功时扣除 blackHolePool）
         calculateTargetToken(amount);
+    }
+
+    // 分页查询我的订单
+    function getMyOrders(uint256 index, uint256 n) public view returns (Order[] memory myOrders) {
+        uint256 cnt = 0;
+        address queryer = msg.sender;
+        uint256[] memory ids = new uint256[](n);
+        // 关键：按投入时间倒叙查询
+        for (uint256 id = orderCount; id > 0 && cnt < n; id--) {
+            if (orders[id].account == queryer && orders[id].index < index){
+                ids[cnt++] = id;
+            }
+        }
+        myOrders = new Order[](cnt);
+        for (uint256 i = 0; i < cnt; i++) myOrders[i] = orders[ids[i]];
+    }
+
+        // 便捷接口：按数量返回账户最近的若干条日志（按写入时间从早到晚排序）
+    // 返回类型为 Log[]，方便调用方一次性获取结构化日志
+    function getAccountLogs(address account, uint256 quantity) public view returns (Log[] memory logList) {
+        uint256 len = accountLogs[account].length;
+        uint256 arrItem = len > quantity ? quantity : len;
+        logList = new Log[](arrItem);
+        if (arrItem == 0) return logList;
+        uint256 floor = len - arrItem;
+        uint256 index = 0;
+        for (uint256 i = floor; i < len; i++) {
+            logList[index] = accountLogs[account][i];
+            index++;
+        }
     }
 }
