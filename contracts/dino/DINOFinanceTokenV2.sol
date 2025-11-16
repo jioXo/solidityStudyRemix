@@ -83,7 +83,6 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
     struct Order {
         StakeInfo stake;
         Rewards rewards;
-        uint8 level;
         bool isOut;
         uint256 index;
         address account;
@@ -193,7 +192,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
     mapping(uint8 => mapping(address => bool)) public hasLevelInitialized;
     mapping(address => uint256) public refReward_map;
     // 子树累计业绩（包含自身 + 所有下级），以 stake.value 单位计
-    mapping(address => uint256) public subtreeTotal;
+    mapping(address => uint256) public teamPerformances;
 
     // === 事件 === 
     event Stake(address indexed account, uint256 amount, uint256 value);
@@ -279,15 +278,6 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
             ) {
                 hasLevelInitialized[lastLevel][account] = true;
                 syncAccountLevel[account] = true;
-
-                bool hasActive = false;
-                for (uint256 i = 0; i < userOrders[account].length; i++) {
-                    Order storage ord = orders[userOrders[account][i]];
-                    if (!ord.isOut) {
-                        ord.level = lastLevel;
-                        hasActive = true;
-                    }
-                }
                 upgradeAccountLevel(account);
             }
         }
@@ -333,8 +323,8 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         o.stake.remain = o.stake.value * outMultiple;
         o.stake.stakeTime = block.timestamp;
 
-        // 增量维护子树总业绩：把新增的订单价值沿 inviter 链向上累加
-        _propagateSubtreeDelta(msg.sender, int256(o.stake.value));
+        // 只在 stake 时累加，不在出局时减少，避免重复累加。
+        achievement(msg.sender, o.stake.value);
 
         totalPool += amount;
         _totalSupply += amount;
@@ -344,38 +334,6 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         members[msg.sender].expectedValue += o.stake.value * outMultiple;
         last30NewPoolTime = block.timestamp;
 
-        upgradeAccountLevel(msg.sender);
-        // 自动尝试同步上级等级：在用户 stake 时向上遍历 inviter 链并调用 upgradeAccountLevel
-        // 这能让满足条件的上级在下级质押时被自动升级，避免额外手动操作。
-        address cur = address(0);
-        // 读取直接上级（调用失败将回退）
-        cur = IRelation(relShip).getInviter(msg.sender);
-    uint8 _depth = 0;
-        // 在遍历时同时检查剩余 gas，避免在循环中耗尽 gas 导致整个事务失败。
-        while (cur != address(0)) {
-            // 记录升级前等级
-            uint8 oldLevel = members[cur].level;
-            // 尝试升级该上级的等级（内部函数已防止不必要的 SSTORE）
-            upgradeAccountLevel(cur);
-            // 记录升级后等级并发事件以便线上追踪
-            uint8 newLevel = members[cur].level;
-            // 统一使用 DebugInfo 记录升级尝试及结果（oldLevel/newLevel 均可为 0 表示无变更）
-            emit DebugInfo(cur, 2, oldLevel, newLevel);
-
-            address next = IRelation(relShip).getInviter(cur);
-            cur = next;
-            _depth++;
-            if (_depth >= 100) {
-                break;
-            }
-        }
-
-        // 如果因 gas 不足或深度限制而中断遍历（cur 非 0 表示还有未处理的上级），
-        // if (cur != address(0)) {
-        //     if (gasleft() <= gasBuffer) {
-        //         emit DebugInfo(cur, 3, 0, 0);
-        //     }
-        // }
         emit Stake(msg.sender, amount, o.stake.value);
     }
 
@@ -565,25 +523,14 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
             require(a != address(0), "Zero addr");
             hasLevelInitialized[level][a] = true;
             if (!syncAccountLevel[a]) syncAccountLevel[a] = true;
-
-            bool active = false;
-            for (uint256 j = 0; j < userOrders[a].length; j++) {
-                Order storage o = orders[userOrders[a][j]];
-                if (!o.isOut) {
-                    o.level = level;
-                    active = true;
-                }
-            }
-            // levelActiveSupply will be adjusted inside upgradeAccountLevel when syncing
             upgradeAccountLevel(a);
             emit LevelInitialized(a, level);
         }
     }
 
     function upgradeAccountLevel(address a) internal {
-        // 新的等级判定：基于“小区业绩”（getTeamValue）来计算等级
-        // 同时保留由 hasLevelInitialized 提供的初始等级保护（如果已初始化则作为最低门槛）
-        // 计算初始保护等级（来自 hasLevelInitialized）
+        // 简化版升级逻辑：基于「小区业绩」计算目标等级，仅更新 members 与 levelActiveSupply，
+        // 避免逐订单写入以节省 gas。保留由 hasLevelInitialized 提供的初始等级保护。
         uint8 target = 0;
         for (uint8 lv = 1; lv <= totalLevel; lv++) {
             if (hasLevelInitialized[lv][a]) {
@@ -592,60 +539,29 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
             }
         }
 
-        // 基于小区业绩计算等级，并取更高值作为目标
         uint8 levelFromPerf = getLevelByTeamValue(a);
         if (levelFromPerf > target) target = levelFromPerf;
 
         if (target == 0) return;
 
-        // 记录旧等级以便更新 levelActiveSupply（若发生变化）
         uint8 oldLevel = members[a].level;
-
-        // 若目标等级等于当前 members 等级，先检测是否所有活跃订单已同步
-        if (target == oldLevel) {
-            bool needWrite = false;
-            for (uint256 i = 0; i < userOrders[a].length; i++) {
-                Order storage o = orders[userOrders[a][i]];
-                if (!o.isOut && o.level != target) {
-                    needWrite = true;
-                    break;
-                }
-            }
-            // 如果无需写入，则直接返回，避免额外 SSTORE
-            if (!needWrite) return;
-
-            // 否则只写不一致的订单等级（不调整 levelActiveSupply，因为成员等级未变）
-            for (uint256 i = 0; i < userOrders[a].length; i++) {
-                Order storage o = orders[userOrders[a][i]];
-                if (!o.isOut && o.level != target) {
-                    o.level = target;
-                }
-            }
-            // 更新快照（安全覆盖）与 members 映射（无实际变化，但保持一致）
+        if (oldLevel == target) {
+            // 等级未变，只需确保快照一致（避免历史分配重放）
             lastLevelRewardPaid[a][target] = rewardPerLevelStored[target];
-            members[a].level = target;
             return;
         }
 
-        // 若目标等级与旧等级不同，执行变更：同步订单并调整 levelActiveSupply
-        for (uint256 i = 0; i < userOrders[a].length; i++) {
-            Order storage o = orders[userOrders[a][i]];
-            if (!o.isOut) {
-                o.level = target;
-            }
-        }
-
-        // 调整 levelActiveSupply 计数：无论用户是否有活跃订单，只要等级发生变化就更新计数
-        if (oldLevel > 0 && levelActiveSupply[oldLevel] > 0) {
+        // 调整活跃用户计数（如果用户当前有活跃订单才计入 levelActiveSupply）
+        bool isActive = activeOrders[a] > 0;
+        if (isActive && oldLevel > 0 && levelActiveSupply[oldLevel] > 0) {
             levelActiveSupply[oldLevel]--;
         }
-        if (levelActiveSupply[target] < type(uint8).max) {
+        if (isActive && levelActiveSupply[target] < type(uint8).max) {
             levelActiveSupply[target]++;
         }
 
-        // 更新用户在该等级的快照，避免历史分配重放
+        // 更新等级快照并写入 members
         lastLevelRewardPaid[a][target] = rewardPerLevelStored[target];
-        // 同步 members 映射，记录用户等级
         members[a].level = target;
     }
 
@@ -701,12 +617,6 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
     function setFundParams(address a, uint256 r) external onlyLauncher {
         fundAddress = a;
         profitRate = r;
-    }
-
-    // 测试辅助：在单元测试环境下可由 launcher 设置 blackHolePool（仅用于本地/测试）
-    // 注意：生产环境不要滥用该接口；仅用于本地测试脚本快速构造场景。
-    function setBlackHolePool(uint256 v) external onlyLauncher {
-        blackHolePool = v;
     }
 
     // === 内部函数 ===
@@ -835,42 +745,40 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         emit NewPoolTriggered(newPool, value, 0, reward70, block.timestamp);
     }
 
-    // ===== 子树累计相关（增量维护） =====
-    /**
-     * @dev 将 delta（单位为 stake.value）应用到 user 及其所有上级的 subtreeTotal 中。
-     * delta > 0 为增加，delta < 0 为减少。减少操作会在下溢时将值设为 0（防御性处理）。
-     * 上溯深度受 MAX_REF_DEPTH 限制，且通过 try/catch 安全调用 relShip。
-     */
-    function _propagateSubtreeDelta(address user, int256 delta) internal {
-        if (user == address(0) || delta == 0) return;
 
-        // 应用到 user 自身
-        if (delta > 0) {
-            uint256 d = uint256(delta);
-            subtreeTotal[user] += d;
-        } else {
-            uint256 d = uint256(-delta);
-            if (subtreeTotal[user] <= d) subtreeTotal[user] = 0;
-            else subtreeTotal[user] -= d;
+
+    // 在新的逻辑中：仅在 stake 时增加业绩（没有减少分支）
+    function achievement(address account, uint256 delta) internal {
+        if (delta == 0 || account == address(0)) return;
+
+        // 给当前账户增加业绩
+        teamPerformances[account] += delta;
+
+        // 每次更新后尝试触发等级重算，并记录升级前后的等级以便追踪
+        {
+            uint8 oldLevel = members[account].level;
+            upgradeAccountLevel(account);
+            uint8 newLevel = members[account].level;
+            if (oldLevel != newLevel) {
+                emit DebugInfo(account, 2, oldLevel, newLevel);
+            }
         }
 
-        // 向上传播到所有祖先（受深度限制，防止外部 relShip 返回超深链造成 gas 爆炸）
-        address cur = IRelation(relShip).getInviter(user);
-    uint256 depth = 0;
-    // MAX_REF_DEPTH = 100 (写死)
-    while (cur != address(0) && depth < 100) {
-            if (delta > 0) {
-                uint256 d = uint256(delta);
-                subtreeTotal[cur] += d;
-            } else {
-                uint256 d = uint256(-delta);
-                if (subtreeTotal[cur] <= d) subtreeTotal[cur] = 0;
-                else subtreeTotal[cur] -= d;
+        // 向上遍历邀请链，把增量累加到每一层（深度上限 100）
+        address superior = IRelation(relShip).getInviter(account);
+        uint256 curLoop = 0;
+        while (superior != address(0)) {
+            teamPerformances[superior] += delta;
+            // 尝试升级该上级并记录变更
+            uint8 oldLevelSup = members[superior].level;
+            upgradeAccountLevel(superior);
+            uint8 newLevelSup = members[superior].level;
+            if (oldLevelSup != newLevelSup) {
+                emit DebugInfo(superior, 2, oldLevelSup, newLevelSup);
             }
-
-            address next = IRelation(relShip).getInviter(cur);
-            cur = next;
-            depth++;
+            superior = IRelation(relShip).getInviter(superior);
+            curLoop++;
+            if (curLoop >= 100) break;
         }
     }
 
@@ -895,12 +803,12 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
             }
 
             if (netAmount >= 1) {
-                // 仅当推荐人有活跃订单（activeOrders>0）时分配推荐奖励
+// 仅当推荐人有活跃订单（activeOrders>0）时分配推荐奖励
                 if (activeOrders[cur] > 0) {
                     refReward_map[cur] += netAmount;
                     emit RefCredit(cur, netAmount, orderId);
                 } else {
-                    // 推荐人无活跃订单：这部分记入回流，稍后回流到 _totalSupply
+// 推荐人无活跃订单：这部分记入回流，稍后回流到 _totalSupply
                     backflowLocal += netAmount;
                 }
             }
@@ -911,7 +819,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
             if (curRefAmount == 0) break;
         }
 
-        // 把未分配（包括链中未消费部分 curRefAmount 与因推荐人无活跃订单而累积的 backflowLocal）回流到 _totalSupply
+// 把未分配（包括链中未消费部分 curRefAmount 与因推荐人无活跃订单而累积的 backflowLocal）回流到 _totalSupply
         if (curRefAmount > 0) {
             backflowLocal += curRefAmount;
             curRefAmount = 0;
@@ -999,7 +907,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
 
 
             ord.stake.received = maxValue;
-            _propagateSubtreeDelta(ord.account, -int256(ord.stake.value));
+            // 按新的业务要求：团队业绩仅在 stake 时增加，不在出局时减少，因此不再调用 _propagateSubtreeDelta 以减少业绩。
             ord.isOut = true;
             if (--activeOrders[ord.account] == 0) {
                 totalActiveUsers--;
@@ -1030,15 +938,6 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
 
 
 
-    // Fallback：在 subtreeTotal 还未初始化时，计算子树总值（view，仅在回退场景使用）
-    function _computeSubtreeRec(address user) internal view returns (uint256) {
-        uint256 total = _getUserValue(user);
-        address[] memory team = IRelation(relShip).getMyTeam(user);
-        for (uint256 i = 0; i < team.length; i++) {
-            total += _computeSubtreeRec(team[i]);
-        }
-        return total;
-    }
 
     function setEarned() internal {
         // Queue: 按订单 stake.balance 加权分配（而不是简单平均）
@@ -1067,8 +966,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
             }
         }
 
-        // Ratio + Referral
-    // Use snapshotTotalSupply (pre-distribution) if set; otherwise fall back to current _totalSupply
+
     uint256 supplyForWeight = snapshotTotalSupply > 0 ? snapshotTotalSupply : _totalSupply;
     if (rewardPerRatioStored > 0 && supplyForWeight > 0) {
             uint256 totalActiveOrderCount = 0;
@@ -1324,11 +1222,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
 
         for (uint256 i = 0; i < team.length; i++) {
             address member = team[i];
-            uint256 val = subtreeTotal[member];
-            if (val == 0) {
-                // 若尚未增量初始化，则回退到视图计算（可能较贵）
-                val = _computeSubtreeRec(member);
-            }
+            uint256 val = teamPerformances[member];
             totalPerf += val;
             if (val > maxValue) maxValue = val;
         }
@@ -1429,7 +1323,6 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         uint256 cnt = 0;
         address queryer = msg.sender;
         uint256[] memory ids = new uint256[](n);
-        // 关键：按投入时间倒叙查询
         for (uint256 id = orderCount; id > 0 && cnt < n; id--) {
             if (orders[id].account == queryer && orders[id].index < index){
                 ids[cnt++] = id;
