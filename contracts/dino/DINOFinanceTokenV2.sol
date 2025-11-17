@@ -1,10 +1,431 @@
 // SPDX-License-Identifier: Unlicensed
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+/**
+開發者免責聲明
+本聲明由[AQ]（以下簡稱“開發者”）針對[DINO]（以下簡稱“項目”）的開發與交付作出，明確開發者與項目方（以下簡稱“客戶”）之間的責任界限。 使用本項目的任何人或實體（以下簡稱“用戶”）在使用前應仔細閱讀本聲明。
+
+1.項目合規性
+客戶須確保其在使用本項目時遵守所有適用的法律法規、行業標準及相關政策。 開發者在專案開發過程中，已依據客戶的要求提供科技實現及相關服務，但不對客戶使用本項目的合規性作出任何保證或承擔任何責任。
+
+2.違規操作責任
+若客戶在使用本項目的過程中，出現任何形式的違規操作，包括但不限於違反法律法規、侵害協力廠商權益、未履行合規性義務等，開發者不對因這些違規操作引發的任何損失、責任、索賠、費用或開支承擔任何責任。 客戶應自行承擔因其違規操作導致的所有後果，並承擔相應的賠償責任。
+
+3.協力廠商風險
+本項目可能涉及到與協力廠商服務、系統或平臺的對接。 客戶在使用這些協力廠商服務時，應自行判斷其合法性和合規性。 開發者不對任何協力廠商的行為或產品的合法性、合規性或適用性承擔責任。
+
+Developer Disclaimer
+
+This statement is made by [AQ] (hereinafter referred to as "Developer") for the development and delivery of [DINO] (hereinafter referred to as "project"), and clarifies the responsibility boundary between the developer and the project party (hereinafter referred to as "customer"). Any person or entity using this project (hereinafter referred to as "user") should read this statement carefully before using it.
+
+1. Project Compliance
+Customers must ensure that they comply with all applicable laws, regulations, industry standards and relevant policies when using this project. During the project development process, the developer has provided technical implementation and related services according to the customer's requirements, but does not make any guarantee or assume any responsibility for the compliance of the customer's use of this project.
+
+2. Responsibility for Illegal Operations
+If the customer has any form of illegal operation during the use of this project, including but not limited to violation of laws and regulations, infringement of third-party rights, failure to perform compliance obligations, etc., the developer shall not be responsible for any losses, liabilities, claims, costs or expenses caused by these illegal operations. The customer shall bear all consequences caused by its illegal operations and bear the corresponding compensation liability.
+
+3. Third-party risks
+This project may involve docking with third-party services, systems or platforms. When using these third-party services, customers should make their own judgments on their legality and compliance. Developers are not responsible for the legality, compliance, or applicability of any third-party actions or products.
+**/
+abstract contract Context {
+    function _msgSender() internal view virtual returns (address) {
+        return msg.sender;
+    }
+    function _msgData() internal view virtual returns (bytes calldata) {
+        return msg.data;
+    }
+    function _contextSuffixLength() internal view virtual returns (uint256) {
+        return 0;
+    }
+}
+
+abstract contract Ownable is Context {
+    address private _owner;
+
+    error OwnableUnauthorizedAccount(address account);
+
+    error OwnableInvalidOwner(address owner);
+
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+    constructor(address initialOwner) {
+        if (initialOwner == address(0)) {
+            revert OwnableInvalidOwner(address(0));
+        }
+        _transferOwnership(initialOwner);
+    }
+
+    modifier onlyOwner() {
+        _checkOwner();
+        _;
+    }
+
+    function owner() public view virtual returns (address) {
+        return _owner;
+    }
+
+    function _checkOwner() internal view virtual {
+        if (owner() != _msgSender()) {
+            revert OwnableUnauthorizedAccount(_msgSender());
+        }
+    }
+
+    function renounceOwnership() public virtual onlyOwner {
+        _transferOwnership(address(0));
+    }
+
+    function transferOwnership(address newOwner) public virtual onlyOwner {
+        if (newOwner == address(0)) {
+            revert OwnableInvalidOwner(address(0));
+        }
+        _transferOwnership(newOwner);
+    }
+
+    function _transferOwnership(address newOwner) internal virtual {
+        address oldOwner = _owner;
+        _owner = newOwner;
+        emit OwnershipTransferred(oldOwner, newOwner);
+    }
+}
+
+interface IERC20 {
+
+    event Transfer(address indexed from, address indexed to, uint256 value);
+
+    event Approval(address indexed owner, address indexed spender, uint256 value);
+
+    function totalSupply() external view returns (uint256);
+
+    function balanceOf(address account) external view returns (uint256);
+
+    function transfer(address to, uint256 value) external returns (bool);
+
+    function allowance(address owner, address spender) external view returns (uint256);
+
+    function approve(address spender, uint256 value) external returns (bool);
+
+    function transferFrom(address from, address to, uint256 value) external returns (bool);
+}
+
+library StorageSlot {
+    struct AddressSlot {
+        address value;
+    }
+
+    struct BooleanSlot {
+        bool value;
+    }
+
+    struct Bytes32Slot {
+        bytes32 value;
+    }
+
+    struct Uint256Slot {
+        uint256 value;
+    }
+
+    struct Int256Slot {
+        int256 value;
+    }
+
+    struct StringSlot {
+        string value;
+    }
+
+    struct BytesSlot {
+        bytes value;
+    }
+
+    function getAddressSlot(bytes32 slot) internal pure returns (AddressSlot storage r) {
+        assembly ("memory-safe") {
+            r.slot := slot
+        }
+    }
+
+    function getBooleanSlot(bytes32 slot) internal pure returns (BooleanSlot storage r) {
+        assembly ("memory-safe") {
+            r.slot := slot
+        }
+    }
+
+    function getBytes32Slot(bytes32 slot) internal pure returns (Bytes32Slot storage r) {
+        assembly ("memory-safe") {
+            r.slot := slot
+        }
+    }
+
+    function getUint256Slot(bytes32 slot) internal pure returns (Uint256Slot storage r) {
+        assembly ("memory-safe") {
+            r.slot := slot
+        }
+    }
+
+    function getInt256Slot(bytes32 slot) internal pure returns (Int256Slot storage r) {
+        assembly ("memory-safe") {
+            r.slot := slot
+        }
+    }
+
+    function getStringSlot(bytes32 slot) internal pure returns (StringSlot storage r) {
+        assembly ("memory-safe") {
+            r.slot := slot
+        }
+    }
+
+    function getStringSlot(string storage store) internal pure returns (StringSlot storage r) {
+        assembly ("memory-safe") {
+            r.slot := store.slot
+        }
+    }
+
+    function getBytesSlot(bytes32 slot) internal pure returns (BytesSlot storage r) {
+        assembly ("memory-safe") {
+            r.slot := slot
+        }
+    }
+
+    function getBytesSlot(bytes storage store) internal pure returns (BytesSlot storage r) {
+        assembly ("memory-safe") {
+            r.slot := store.slot
+        }
+    }
+}
+
+abstract contract ReentrancyGuard {
+    using StorageSlot for bytes32;
+
+    // keccak256(abi.encode(uint256(keccak256("openzeppelin.storage.ReentrancyGuard")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant REENTRANCY_GUARD_STORAGE =
+        0x9b779b17422d0df92223018b32b4d1fa46e071723d6817e2486d003becc55f00;
+
+    uint256 private constant NOT_ENTERED = 1;
+    uint256 private constant ENTERED = 2;
+
+    error ReentrancyGuardReentrantCall();
+
+    constructor() {
+        _reentrancyGuardStorageSlot().getUint256Slot().value = NOT_ENTERED;
+    }
+
+    modifier nonReentrant() {
+        _nonReentrantBefore();
+        _;
+        _nonReentrantAfter();
+    }
+
+    modifier nonReentrantView() {
+        _nonReentrantBeforeView();
+        _;
+    }
+
+    function _nonReentrantBeforeView() private view {
+        if (_reentrancyGuardEntered()) {
+            revert ReentrancyGuardReentrantCall();
+        }
+    }
+
+    function _nonReentrantBefore() private {
+        _nonReentrantBeforeView();
+        _reentrancyGuardStorageSlot().getUint256Slot().value = ENTERED;
+    }
+
+    function _nonReentrantAfter() private {
+        _reentrancyGuardStorageSlot().getUint256Slot().value = NOT_ENTERED;
+    }
+
+    function _reentrancyGuardEntered() internal view returns (bool) {
+        return _reentrancyGuardStorageSlot().getUint256Slot().value == ENTERED;
+    }
+
+    function _reentrancyGuardStorageSlot() internal pure virtual returns (bytes32) {
+        return REENTRANCY_GUARD_STORAGE;
+    }
+}
+
+
+interface IERC165 {
+    function supportsInterface(bytes4 interfaceId) external view returns (bool);
+}
+
+interface IERC1363 is IERC20, IERC165 {
+
+    function transferAndCall(address to, uint256 value) external returns (bool);
+
+    function transferAndCall(address to, uint256 value, bytes calldata data) external returns (bool);
+
+    function transferFromAndCall(address from, address to, uint256 value) external returns (bool);
+
+    function transferFromAndCall(address from, address to, uint256 value, bytes calldata data) external returns (bool);
+
+    function approveAndCall(address spender, uint256 value) external returns (bool);
+
+    function approveAndCall(address spender, uint256 value, bytes calldata data) external returns (bool);
+}
+
+library SafeERC20 {
+
+    error SafeERC20FailedOperation(address token);
+
+    error SafeERC20FailedDecreaseAllowance(address spender, uint256 currentAllowance, uint256 requestedDecrease);
+
+    function safeTransfer(IERC20 token, address to, uint256 value) internal {
+        if (!_safeTransfer(token, to, value, true)) {
+            revert SafeERC20FailedOperation(address(token));
+        }
+    }
+
+    function safeTransferFrom(IERC20 token, address from, address to, uint256 value) internal {
+        if (!_safeTransferFrom(token, from, to, value, true)) {
+            revert SafeERC20FailedOperation(address(token));
+        }
+    }
+
+    function trySafeTransfer(IERC20 token, address to, uint256 value) internal returns (bool) {
+        return _safeTransfer(token, to, value, false);
+    }
+
+    function trySafeTransferFrom(IERC20 token, address from, address to, uint256 value) internal returns (bool) {
+        return _safeTransferFrom(token, from, to, value, false);
+    }
+
+    function safeIncreaseAllowance(IERC20 token, address spender, uint256 value) internal {
+        uint256 oldAllowance = token.allowance(address(this), spender);
+        forceApprove(token, spender, oldAllowance + value);
+    }
+
+    function safeDecreaseAllowance(IERC20 token, address spender, uint256 requestedDecrease) internal {
+        unchecked {
+            uint256 currentAllowance = token.allowance(address(this), spender);
+            if (currentAllowance < requestedDecrease) {
+                revert SafeERC20FailedDecreaseAllowance(spender, currentAllowance, requestedDecrease);
+            }
+            forceApprove(token, spender, currentAllowance - requestedDecrease);
+        }
+    }
+
+    function forceApprove(IERC20 token, address spender, uint256 value) internal {
+        if (!_safeApprove(token, spender, value, false)) {
+            if (!_safeApprove(token, spender, 0, true)) revert SafeERC20FailedOperation(address(token));
+            if (!_safeApprove(token, spender, value, true)) revert SafeERC20FailedOperation(address(token));
+        }
+    }
+
+    function transferAndCallRelaxed(IERC1363 token, address to, uint256 value, bytes memory data) internal {
+        if (to.code.length == 0) {
+            safeTransfer(token, to, value);
+        } else if (!token.transferAndCall(to, value, data)) {
+            revert SafeERC20FailedOperation(address(token));
+        }
+    }
+
+    function transferFromAndCallRelaxed(
+        IERC1363 token,
+        address from,
+        address to,
+        uint256 value,
+        bytes memory data
+    ) internal {
+        if (to.code.length == 0) {
+            safeTransferFrom(token, from, to, value);
+        } else if (!token.transferFromAndCall(from, to, value, data)) {
+            revert SafeERC20FailedOperation(address(token));
+        }
+    }
+
+    function approveAndCallRelaxed(IERC1363 token, address to, uint256 value, bytes memory data) internal {
+        if (to.code.length == 0) {
+            forceApprove(token, to, value);
+        } else if (!token.approveAndCall(to, value, data)) {
+            revert SafeERC20FailedOperation(address(token));
+        }
+    }
+
+    function _safeTransfer(IERC20 token, address to, uint256 value, bool bubble) private returns (bool success) {
+        bytes4 selector = IERC20.transfer.selector;
+
+        assembly ("memory-safe") {
+            let fmp := mload(0x40)
+            mstore(0x00, selector)
+            mstore(0x04, and(to, shr(96, not(0))))
+            mstore(0x24, value)
+            success := call(gas(), token, 0, 0x00, 0x44, 0x00, 0x20)
+            // if call success and return is true, all is good.
+            // otherwise (not success or return is not true), we need to perform further checks
+            if iszero(and(success, eq(mload(0x00), 1))) {
+                // if the call was a failure and bubble is enabled, bubble the error
+                if and(iszero(success), bubble) {
+                    returndatacopy(fmp, 0x00, returndatasize())
+                    revert(fmp, returndatasize())
+                }
+                // if the return value is not true, then the call is only successful if:
+                // - the token address has code
+                // - the returndata is empty
+                success := and(success, and(iszero(returndatasize()), gt(extcodesize(token), 0)))
+            }
+            mstore(0x40, fmp)
+        }
+    }
+
+    function _safeTransferFrom(
+        IERC20 token,
+        address from,
+        address to,
+        uint256 value,
+        bool bubble
+    ) private returns (bool success) {
+        bytes4 selector = IERC20.transferFrom.selector;
+
+        assembly ("memory-safe") {
+            let fmp := mload(0x40)
+            mstore(0x00, selector)
+            mstore(0x04, and(from, shr(96, not(0))))
+            mstore(0x24, and(to, shr(96, not(0))))
+            mstore(0x44, value)
+            success := call(gas(), token, 0, 0x00, 0x64, 0x00, 0x20)
+            // if call success and return is true, all is good.
+            // otherwise (not success or return is not true), we need to perform further checks
+            if iszero(and(success, eq(mload(0x00), 1))) {
+                // if the call was a failure and bubble is enabled, bubble the error
+                if and(iszero(success), bubble) {
+                    returndatacopy(fmp, 0x00, returndatasize())
+                    revert(fmp, returndatasize())
+                }
+                // if the return value is not true, then the call is only successful if:
+                // - the token address has code
+                // - the returndata is empty
+                success := and(success, and(iszero(returndatasize()), gt(extcodesize(token), 0)))
+            }
+            mstore(0x40, fmp)
+            mstore(0x60, 0)
+        }
+    }
+
+    function _safeApprove(IERC20 token, address spender, uint256 value, bool bubble) private returns (bool success) {
+        bytes4 selector = IERC20.approve.selector;
+
+        assembly ("memory-safe") {
+            let fmp := mload(0x40)
+            mstore(0x00, selector)
+            mstore(0x04, and(spender, shr(96, not(0))))
+            mstore(0x24, value)
+            success := call(gas(), token, 0, 0x00, 0x44, 0x00, 0x20)
+            // if call success and return is true, all is good.
+            // otherwise (not success or return is not true), we need to perform further checks
+            if iszero(and(success, eq(mload(0x00), 1))) {
+                // if the call was a failure and bubble is enabled, bubble the error
+                if and(iszero(success), bubble) {
+                    returndatacopy(fmp, 0x00, returndatasize())
+                    revert(fmp, returndatasize())
+                }
+                // if the return value is not true, then the call is only successful if:
+                // - the token address has code
+                // - the returndata is empty
+                success := and(success, and(iszero(returndatasize()), gt(extcodesize(token), 0)))
+            }
+            mstore(0x40, fmp)
+        }
+    }
+}
 
 interface IUniswapV2Router02 {
     function WETH() external pure returns (address);
@@ -33,28 +454,27 @@ interface IRelation {
 
 interface ILastFinance {
     function getAccountGrade(address account) external view returns (uint8);
-
-    function levelInit(
-        uint8 level,
-        address account
-    ) external view returns (bool);
 }
 
-contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
+contract DINOFinanceTokenV3 is Ownable(msg.sender), ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // === 外部合约 ===
     IUniswapV2Router02 public immutable uniswapRouter;
     address public relShip;
     IERC20 public DINOToken;
-    address public launcher;
-    address public fundAddress;
-    // address public usdt = 0xAa8Ff530B040A36eaF29CF161F79b44F4e76d254;
-  address public usdt = 0xAa8Ff530B040A36eaF29CF161F79b44F4e76d254;
+     address[2] public launcher;
+  // address public usdt = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913; 
+    // address public constant uRouter = 0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24;
+    // address public constant TARGET_TOKEN = 0x6dB171BC785386973994072729D8fC707C2948e4;
+    // address public burnWallet = 0x000000000000000000000000000000000000dEaD;
+
+    address public usdt = 0xAa8Ff530B040A36eaF29CF161F79b44F4e76d254;
     address public constant uRouter = 0x6682375ebC1dF04676c0c5050934272368e6e883;
     address public constant TARGET_TOKEN = 0x70bD93352615a810417C776942FeaED8c366f522;
-    address public burnWallet = 0x0000000000000000000000000000000000000000;
-    address public marketingWallet = 0x1a238010ff6f25BB34F42405C1EEa36aB87A1Bd5;
+    address public burnWallet = 0x000000000000000000000000000000000000dEaD;
+
+    address public marketingWallet;
     address public immutable WETH;
 
     // === 质押与收益 ===
@@ -86,6 +506,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         bool isOut;
         uint256 index;
         address account;
+        uint256 ratioDebt; // used by accRatioPerShare model to track per-order reward debt
     }
 
     mapping(uint256 => Order) public orders;
@@ -109,13 +530,11 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
     uint256 public getIntervalTime = 4 hours;
     uint256 public minRequiredAmount = 100 ether;
     uint8 public outMultiple = 2;
-    uint256 public rewardPerQueueStored;
+    // 旧的即时排队分配已移除（使用 epoch snapshot 机制替代）
+    // uint256 public rewardPerQueueStored;
     uint256 public rewardPerRatioStored;
     uint256 public blackHolePool;
-    uint256 public last30NewPoolTime;
-    uint256 public constant TRIGGER_THRESHOLD = 100_000 * 1e6;
-    uint256 public constant NO_STAKE_DURATION = 1 hours;
-    // MAX_REF_DEPTH 与 MIN_REF_REWARD 不再暴露为 public 常量，已内联为代码中的字面量（100 / 1）以节省字节码
+    uint256 public last30NewPoolTime = 0;
 
     // === 日志 & 等级 ===
     struct Log {
@@ -147,7 +566,64 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         accountLogs[account].push(Log(block.timestamp, quantity, value, from));
     }
 
+    // === 排队奖队列相关 ===
+    // 当前排队奖队列的最新 快照 ID 
+    uint256 public queueEpoch;
+    // 快照 ID -> 该快照分配的总排队奖金额
+    mapping(uint256 => uint256) public queueEpochReward;
+    // 快照 ID -> 该快照创建时的初始分配金额（用于按固定初始值计算每个 order 的份额）
+    mapping(uint256 => uint256) public queueEpochInitialReward;
+    // 累计已分配（用于判断是否已分发完，便于清理）
+    // NOTE: 为减少合约体积，已移除显式的 queueEpochAllocated 存储。
+    // 可通过 queueEpochInitialReward[epoch] - queueEpochReward[epoch] 推导已分配量。
+    event QueueEpochProcessingTruncated(uint256 indexed orderId, uint256 processed, uint256 remaining);
+    // 快照 ID -> 该快照中包含的总权益余额（用于份额计算）
+    mapping(uint256 => uint256) public queueEpochTotalBalance;
+    // 快照 ID -> 包含的订单列表
+    mapping(uint256 => uint256[]) public queueEpochOrders;
+    // 快照 ID -> 剩余未处理订单计数（用于在全部订单处理完后回收残余奖励）
+    mapping(uint256 => uint256) public queueEpochRemainingCount;
+    // 订单 ID -> 包含的快照列表
+    mapping(uint256 => uint256[]) public orderQueueEpochs;
+    // 订单 ID -> 在对应快照列表中的索引位置
+    mapping(uint256 => uint256) public orderQueueEpochIndex;
+    // legacy queue events removed; use EpochCreated / EpochOrderRecorded / EpochProcessed
 
+    // --- Ratio epoch (deferred ratio reward) ---
+    uint256 public ratioEpoch;
+    // legacy ratio epoch storage retained for compatibility but large-scale per-order writes
+    // are replaced by the `accRatioPerShare` model to avoid OOG when distributing to many orders.
+    mapping(uint256 => uint256) public ratioEpochReward;
+    mapping(uint256 => uint256) public ratioEpochInitialReward;
+    mapping(uint256 => uint256) public ratioEpochTotalBalance;
+    mapping(uint256 => uint256[]) public ratioEpochOrders;
+    mapping(uint256 => uint256[]) public orderRatioEpochs;
+    mapping(uint256 => uint256) public orderRatioEpochIndex;
+    // accumulated ratio per share scaled by RATIO_SCALE
+    uint256 public accRatioPerShare;
+    // legacy ratio events removed; use EpochCreated / EpochOrderRecorded / EpochProcessed
+   
+
+    // === Level epoch deferred processing (to avoid gas blowup) ===
+    // 每次 level 分配时创建 epoch，把 per-user 的份额记入 epoch；具体把份额写到订单上
+    // 的动作在用户交互时（stake / claim）逐用户处理，避免一次性遍历所有用户导致 OOG。
+    uint256 public levelEpoch;
+    // epoch -> per-user DINO amount for this epoch
+    mapping(uint256 => uint256) public levelEpochPerUser;
+    // epoch -> level id
+    mapping(uint256 => uint8) public levelEpochLevel;
+    // user -> list of level epochs they should receive
+    mapping(address => uint256[]) public userLevelEpochs;
+    // user -> index cursor into userLevelEpochs (already processed count)
+    mapping(address => uint256) public userLevelEpochIndex;
+    // epoch -> user -> already consumed amount (DINO) for that user in this epoch
+    mapping(uint256 => mapping(address => uint256)) public levelEpochUserConsumed;
+
+    // legacy level created event removed; use EpochCreated
+    event LevelEpochProcessingTruncated(address indexed user, uint256 processed, uint256 remaining);
+
+    // queue snapshot chunking state
+    // (chunking removed) single-shot snapshot will be used for queue epochs
 
 
     // levelRequiredAmount 存为标准的 USDT 最小单位（每项 = 人类可读值 * 1e6）
@@ -164,9 +640,24 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         10_000_000_000_000// 10_000_000 * 1e6
     ];
 
-    mapping(uint8 => uint256[2]) public levelParams;
-    uint256 public dailyRate = 5;
-    uint256 public levelRate = 50;
+ mapping(uint8 => uint256[2]) public levelParams;
+    uint256 public dailyRate = 5;  // 每日释放
+    uint256 public queueRate = 10; // 排队奖
+    uint256 public ratioRate = 50; // 比例奖
+    uint256 public levelRate = 40; // 级别奖
+    uint256 public recRate = 25;   // 推荐奖
+
+    uint256 public levelPesRate = 80; // 级别奖个人
+    uint256 public levelMktRate = 5; // 级别奖营销
+    uint256 public levelBakRate = 4; // 级别奖反流
+    uint256 public levelSwpRate = 9; // 级别奖兑换
+    uint256 public levelPoolRate = 2; // 级别奖新奖池
+
+    uint256 public nostakePoolRate = 30; // 一小时没有捐赠释放比例
+    uint256 public nostakeTimeout = 1 hours; // 一小时没有捐赠释放比例
+    uint256 public fullPoolRate = 70; // 奖池满比例
+    uint256 public fullPoolThreshold = 100_000_000_000; // 满奖池阈值
+
     uint256 public totalLevel = 9;
     mapping(address => bool) public blacklist;
     bool public stakeState = true;
@@ -187,7 +678,6 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
     // === 等级同步 ===
     bool public isSyncLevel = false;
     address public lastFinance;
-    uint256 public profitRate;
     mapping(address => bool) public syncAccountLevel;
     mapping(uint8 => mapping(address => bool)) public hasLevelInitialized;
     mapping(address => uint256) public refReward_map;
@@ -210,23 +700,19 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
     // 当推荐链中有部分预留份额未分配（链断裂或达到 MIN_REF_REWARD），把该未分配部分回流到 _totalSupply
     event RefBackflow(uint256 indexed orderId, uint256 amount);
 
-
-    // 通用调试事件，用于替代若干特定调试事件，节省字节码并便于统一处理。
-    // kind: 1=getInviterFailed, 2=ancestorUpgradeStep, 3=stoppedByGas, etc.
-    // subject: 受影响的地址；
-    // oldLevel/newLevel: 在升级步骤时的等级对比（否则为 0）
-    // 注意：为节省字节码已移除 depth 字段
-    event DebugInfo(
-        address indexed subject,
-        uint8 kind,
-        uint8 oldLevel,
-        uint8 newLevel
-    );
     event LevelInitialized(address indexed account, uint8 level);
+
+    // Unified epoch events to save bytecode and on-chain event types
+    // kind: 0 = Queue, 1 = Level, 2 = Ratio
+    event EpochCreated(uint8 indexed kind, uint256 indexed epoch, uint256 a, uint256 b, uint256 c);
+    event EpochOrderRecorded(uint8 indexed kind, uint256 indexed epoch, uint256 indexed orderId, uint256 stakeBalance);
+    event EpochProcessed(uint8 indexed kind, uint256 indexed epoch, uint256 indexed orderId, uint256 amount);
+    // 当某个 queue epoch 的所有订单都已被处理，但该 epoch 仍有少量残余奖励时，回收该残余
+    event QueueEpochResidualReclaimed(uint256 indexed epoch, uint256 amount);
 
     // === 修饰器 ===
     modifier onlyLauncher() {
-        require(msg.sender == launcher, "Not launcher");
+        require((msg.sender == launcher[0] || msg.sender == launcher[1]), "Not launcher");
         _;
     }
     modifier whenNotPaused() {
@@ -238,10 +724,10 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         _;
     }
 
-    function updateReward1() public {
-        // 原始逻辑在 updateReward1 中仅检查 _totalSupply>0，允许手动/测试时强制分发
-        _distributeDailyRewards(true);
+    function updateReward1() public{
+        _distributeDailyRewards(true);  
     }
+
     // 抽取到内部函数以避免在 modifier 与外部函数之间重复相同逻辑，节省字节码
     // 如果 force 为 true 则忽略时间间隔检查（用于手动触发或测试）
     function _distributeDailyRewards(bool force) internal {
@@ -254,14 +740,14 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
             snapshotTotalSupply = _totalSupply;
             _totalSupply = _totalSupply > dayReward ? _totalSupply - dayReward : 0;
 
-            updateQueueTopList(dayReward / 10);
-            distributeLevelReward((dayReward * 4) / 10);
-            distributeRatioReward(dayReward / 2);
-            setEarned();
+            updateQueueTopList((dayReward* queueRate) / 100);
+            distributeLevelReward((dayReward * levelRate) / 100);
+            distributeRatioReward((dayReward * ratioRate) / 100);
+
             // clear snapshot after distribution
             snapshotTotalSupply = 0;
-            lastUpdateDailyRewardTime += 1 days;
-            rewardPerQueueStored = rewardPerRatioStored = 0;
+            lastUpdateDailyRewardTime = block.timestamp;
+            rewardPerRatioStored = 0;
         }
     }
 
@@ -289,7 +775,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         relShip = _relShip;
         uniswapRouter = IUniswapV2Router02(uRouter);
         WETH = uniswapRouter.WETH();
-        launcher = msg.sender;
+        launcher[0] = msg.sender;
 
         lastUpdateDailyRewardTime = block.timestamp;
 
@@ -303,9 +789,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
     }
 
     // === 核心功能 ===
-    function stake(
-        uint256 amount
-    ) external nonReentrant whenNotPaused checkLevel(msg.sender) updateReward {
+     function stake(uint256 amount) external nonReentrant whenNotPaused checkLevel(msg.sender) updateReward {
         require(msg.sender.code.length == 0, "Not EOA");
         require(amount >= minRequiredAmount, "Too small");
         require(stakeState, "Stake disabled");
@@ -315,6 +799,10 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         if (activeOrders[msg.sender] == 0) totalActiveUsers++;
         activeOrders[msg.sender]++;
 
+        // 在新的 stake 交互中，先处理该账户可能存在的未结算 epochs（懒处理）
+        // (level + per-order queue/ratio)，通过 helper 统一处理以减少重复代码。
+        processPendingEpochsForUser(msg.sender);
+
         Order storage o = orders[++orderCount];
         o.index = orderCount;
         o.account = msg.sender;
@@ -322,6 +810,8 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         o.stake.value = calculateTokenToValue(amount);
         o.stake.remain = o.stake.value * outMultiple;
         o.stake.stakeTime = block.timestamp;
+        // initialize ratio debt so new orders don't retroactively receive past ratio distributions
+        o.ratioDebt = (o.stake.balance * accRatioPerShare) / RATIO_SCALE;
 
         // 只在 stake 时累加，不在出局时减少，避免重复累加。
         achievement(msg.sender, o.stake.value);
@@ -337,13 +827,174 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         emit Stake(msg.sender, amount, o.stake.value);
     }
 
-    function getReward() external whenNotPaused nonReentrant updateReward {
-        if (lastClaimTime[msg.sender] != 0) {
-            require(
-                block.timestamp >= lastClaimTime[msg.sender] + getIntervalTime,
-                "Claim too soon"
-            );
+     // 处理某一订单的未结算 queue epoch，把份额累加到 orders[orderId].rewards.queue
+    function processOrderQueueEpochs(uint256 orderId) internal {
+        uint256 idx = orderQueueEpochIndex[orderId];
+        uint256[] storage eids = orderQueueEpochs[orderId];
+        Order storage ord = orders[orderId];
+
+        for (uint256 i = idx; i < eids.length; i++) {
+            uint256 eid = eids[i];
+            uint256 reward = queueEpochReward[eid];
+            uint256 initial = queueEpochInitialReward[eid];
+            uint256 total = queueEpochTotalBalance[eid];
+
+            // 如果该 epoch 已无可分配或总权重为 0，直接推进并在必要时回收残余
+            if (reward == 0 || total == 0) {
+                _advanceOrderEpoch(orderId, i, eid);
+                continue;
+            }
+
+            // 按创建时的 initial 计算理论份额，保证顺序无关
+            uint256 share = (initial * ord.stake.balance) / total;
+            if (share == 0) {
+                _advanceOrderEpoch(orderId, i, eid);
+                continue;
+            }
+
+            // 分配并更新剩余
+            ord.rewards.queue += share;
+            emit EpochProcessed(0, eid, orderId, share);
+            if (queueEpochReward[eid] > share) queueEpochReward[eid] -= share;
+            else queueEpochReward[eid] = 0;
+
+            if (queueEpochReward[eid] == 0) {
+                delete queueEpochOrders[eid];
+                queueEpochTotalBalance[eid] = 0;
+            }
+
+            // 记录该订单已处理的索引并处理剩余计数/回收
+            orderQueueEpochIndex[orderId] = i + 1;
+            if (queueEpochRemainingCount[eid] > 0) queueEpochRemainingCount[eid] -= 1;
+            if (queueEpochRemainingCount[eid] == 0) {
+                uint256 leftover = queueEpochReward[eid];
+                if (leftover > 0) {
+                    _totalSupply += leftover;
+                    emit QueueEpochResidualReclaimed(eid, leftover);
+                }
+                queueEpochReward[eid] = 0;
+                delete queueEpochOrders[eid];
+                queueEpochTotalBalance[eid] = 0;
+                queueEpochInitialReward[eid] = 0;
+            }
         }
+    }
+
+    // 抽出重复的推进与回收逻辑，减少字节码重复
+    function _advanceOrderEpoch(
+        uint256 orderId,
+        uint256 idxPlusZeroBased,
+        uint256 eid
+    ) internal {
+        orderQueueEpochIndex[orderId] = idxPlusZeroBased + 1;
+        if (queueEpochRemainingCount[eid] > 0) queueEpochRemainingCount[eid] -= 1;
+        if (queueEpochRemainingCount[eid] == 0) {
+            uint256 leftover = queueEpochReward[eid];
+            if (leftover > 0) {
+                _totalSupply += leftover;
+                emit QueueEpochResidualReclaimed(eid, leftover);
+            }
+            queueEpochReward[eid] = 0;
+            delete queueEpochOrders[eid];
+            queueEpochTotalBalance[eid] = 0;
+            queueEpochInitialReward[eid] = 0;
+        }
+    }
+
+    // 处理某一订单的未结算 ratio epochs（把份额累加到 orders[orderId].rewards.ratio）
+    function processOrderRatioEpochs(uint256 orderId) internal {
+        // Using accRatioPerShare model: compute current accumulated debt and credit delta to order
+        Order storage ord = orders[orderId];
+        if (ord.isOut) return;
+        uint256 currentDebt = (ord.stake.balance * accRatioPerShare) / RATIO_SCALE;
+        if (currentDebt > ord.ratioDebt) {
+            uint256 delta = currentDebt - ord.ratioDebt;
+            ord.rewards.ratio += delta;
+            ord.ratioDebt = currentDebt;
+            // emit a generic processed event (epoch unknown here), use 2 as kind with epoch=0
+            emit EpochProcessed(2, 0, orderId, delta);
+        }
+    }
+
+    // 把 perUser 分配到用户订单的逻辑抽成一个内部函数，返回未分配的剩余值
+    function _allocateLevelToUserOrders(address user, uint256 perUser) internal returns (uint256) {
+        uint256 remaining = perUser;
+        uint256[] storage uords = userOrders[user];
+        for (uint256 j = 0; j < uords.length && remaining > 0; j++) {
+            uint256 oid = uords[j];
+            Order storage ord = orders[oid];
+            if (ord.isOut) continue;
+            if (ord.stake.remain <= ord.stake.received) continue;
+            uint256 remainingValue = ord.stake.remain - ord.stake.received;
+            uint256 allowedDino = calculateValueToToken(remainingValue);
+            if (allowedDino == 0) continue;
+            uint256 toAlloc = remaining <= allowedDino ? remaining : allowedDino;
+            ord.rewards.level += toAlloc;
+            remaining -= toAlloc;
+        }
+        return remaining;
+    }
+
+    // 处理用户的未结算 level epochs（把每个 epoch 的 perUser 分配到该用户的订单上）
+    function processUserLevelEpochs(address user) internal {
+        uint256 idx = userLevelEpochIndex[user];
+        uint256[] storage eids = userLevelEpochs[user];
+        if (eids.length == 0) return;
+        
+
+        // 计算用户当前活跃订单总 stake balance
+        uint256 totalBal = 0;
+        uint256[] storage uords = userOrders[user];
+        for (uint256 i = 0; i < uords.length; i++) {
+            Order storage o = orders[uords[i]];
+            if (!o.isOut) totalBal += o.stake.balance;
+        }
+
+        for (uint256 i = idx; i < eids.length; i++) {
+            uint256 eid = eids[i];
+            uint256 perUser = levelEpochPerUser[eid];
+            // if nothing to allocate or user has no active balance, advance cursor and skip
+            if (perUser == 0 || totalBal == 0) {
+                userLevelEpochIndex[user] = i + 1;
+                continue;
+            }
+
+            uint256 remaining = _allocateLevelToUserOrders(user, perUser);
+
+            // 如果 perUser 未被完全分配（所有订单均已满），把剩余回流到总池
+            if (remaining > 0) _totalSupply += remaining;
+
+            // advance cursor only after successful processing of this epoch for the user
+            userLevelEpochIndex[user] = i + 1;
+        }
+    }
+
+    // 统一处理用户的未结算 epoch：先处理 level epoch（按用户），再对该用户的每个活跃订单
+    // 处理 queue 与 ratio 的 order-level epochs（懒处理）。抽象出来以减少重复代码。
+    function processPendingEpochsForUser(address user) internal {
+        // 先处理用户级别 epoch
+        processUserLevelEpochs(user);
+
+        // 然后对该用户的所有订单做 queue/ratio 懒处理，便于在单处调用时暴露最新分配
+        uint256[] storage uords = userOrders[user];
+        for (uint256 _i = 0; _i < uords.length; _i++) {
+            uint256 _oid = uords[_i];
+            if (_oid == 0) continue;
+            if (!orders[_oid].isOut) {
+                processOrderQueueEpochs(_oid);
+                processOrderRatioEpochs(_oid);
+            }
+        }
+    }
+
+    function getReward() external whenNotPaused nonReentrant updateReward {
+        //todo
+        // if (lastClaimTime[msg.sender] != 0) {
+        //     require(
+        //         block.timestamp >= lastClaimTime[msg.sender] + getIntervalTime,
+        //         "Claim too soon"
+        //     );
+        // }
 
         uint256 paid = _claimRewards(msg.sender, RewardType.Main);
         if (paid > 0) {
@@ -357,10 +1008,10 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
 
         if (grossLevelPayout > 0) {
             // 按规则拆分：2% 新奖池、9% 黑洞、4% 返还总池、5% 营销，剩余 80% 为个人份额
-            uint256 partNewPool = (grossLevelPayout * 2) / 100;
-            uint256 partBlackHole = (grossLevelPayout * 9) / 100;
-            uint256 partTotalPool = (grossLevelPayout * 4) / 100;
-            uint256 partMarketing = (grossLevelPayout * 5) / 100;
+             uint256 partNewPool = (grossLevelPayout * levelPoolRate) / 100;
+            uint256 partBlackHole = (grossLevelPayout * levelSwpRate) / 100;
+            uint256 partTotalPool = (grossLevelPayout * levelBakRate) / 100;
+            uint256 partMarketing = (grossLevelPayout * levelMktRate) / 100;
 
             uint256 personalPart = grossLevelPayout -
                 (partNewPool + partBlackHole + partTotalPool + partMarketing);
@@ -380,13 +1031,6 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
 
             // 对个人部分先扣手续费，然后转给用户
             uint256 personalNet = personalPart;
-            if (profitRate > 0 && fundAddress != address(0)) {
-                uint256 fee = (personalNet * profitRate) / 1000;
-                if (fee > 0) {
-                    DINOToken.safeTransfer(fundAddress, fee);
-                    personalNet -= fee;
-                }
-            }
 
             require(
                 DINOToken.balanceOf(address(this)) >= personalNet,
@@ -401,8 +1045,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
             // record log for level personal payout
             _pushAccountLog(msg.sender, personalNet, 2);
 
-            // 触发 newPool 分发逻辑（30% / 70%）
-            distributeNewPool30Percent();
+              // 触发 newPool 分发逻辑（70%）
             distributeNewPool70Percent();
         }
     }
@@ -412,28 +1055,30 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         Level
     }
 
-    function _claimRewards(
-        address user,
-        RewardType rtype
-    ) internal returns (uint256) {
+    function _claimRewards(address user, RewardType rtype) internal returns (uint256) {
         require(!blacklist[user], "Blacklisted");
         uint256[] memory ids = userOrders[user];
         require(ids.length > 0, "No orders");
 
         // 新规则（仅对非级别领取生效）: 只要用户在过去 getIntervalTime（默认 4 小时）内有任何一次下单，
-        // 则该用户不得进行非级别领取（Main）。Level 类型领取不受此限制。
-        if (rtype == RewardType.Main) {
-            for (uint256 _i = 0; _i < ids.length; _i++) {
-                Order storage _ord = orders[ids[_i]];
-                if (_ord.stake.stakeTime + getIntervalTime > block.timestamp) {
-                    revert("Order too recent");
-                }
-            }
-        }
+        // 则该用户不得进行非级别领取（Main）。Level 类型领取不受此限制。todo
+        // if (rtype == RewardType.Main) {
+        //     for (uint256 _i = 0; _i < ids.length; _i++) {
+        //         Order storage _ord = orders[ids[_i]];
+        //         if (_ord.stake.stakeTime + getIntervalTime > block.timestamp) {
+        //             revert("Order too recent");
+        //         }
+        //     }
+        // }
+
 
         uint256 actualPayout = 0;
         // 本次领取中实际由排队奖支付的累计量（DINO 单位），用于统一写入日志
         uint256 totalQueuePaid = 0;
+
+        // 在领取入口统一处理该用户的所有 pending epochs（level + per-order queue/ratio），
+        // 以便后续遍历订单时能直接看到已分配的值。
+        processPendingEpochsForUser(user);
 
         for (uint256 i = 0; i < ids.length; i++) {
             uint256 id = ids[i];
@@ -455,15 +1100,6 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         // 对于 Level 类型：不要在此处执行转账（由 getLevelReward 统一拆分并转账）
         if (rtype == RewardType.Level) {
             return actualPayout;
-        }
-
-        // Main 类型：正常收手续费并转账给用户
-        if (profitRate > 0 && fundAddress != address(0)) {
-            uint256 fee = (actualPayout * profitRate) / 1000;
-            if (fee > 0) {
-                DINOToken.safeTransfer(fundAddress, fee);
-                actualPayout -= fee;
-            }
         }
 
         require(
@@ -488,17 +1124,16 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
     }
 
     // === 配置函数 ===
-    function setLauncher(address _launcher) external onlyLauncher {
-        launcher = _launcher;
+     function setLauncher(uint256 idx, address _launcher) external onlyLauncher {
+        require(idx < 2, "Too big");
+        launcher[idx] = _launcher;
     }
 
-    // function setSyncLevelParams(
-    //     bool _isSyncLevel,
-    //     address _lastFinance
-    // ) external onlyOwner {
-    //     isSyncLevel = _isSyncLevel;
-    //     lastFinance = _lastFinance;
-    // }
+    // 开启级别同步
+    function setSyncLevelParams(bool _isSyncLevel, address _lastFinance) external onlyOwner {
+        isSyncLevel = _isSyncLevel;
+        lastFinance = _lastFinance;
+    }
 
     function setblacklist(address a, bool v) external onlyLauncher {
         blacklist[a] = v;
@@ -508,15 +1143,8 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         stakeState = v;
     }
 
-    function emergencyPause(bool v) external onlyOwner {
-        paused = v;
-    }
 
-    function initLevelData(
-        uint8 level,
-        address[] memory accounts,
-        bool
-    ) external onlyLauncher {
+    function initLevelData(uint8 level,address[] memory accounts) external onlyLauncher {
         require(level > 0 && level <= totalLevel, "Invalid level");
         for (uint256 i = 0; i < accounts.length; i++) {
             address a = accounts[i];
@@ -529,8 +1157,9 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
     }
 
     function upgradeAccountLevel(address a) internal {
-        // 简化版升级逻辑：基于「小区业绩」计算目标等级，仅更新 members 与 levelActiveSupply，
-        // 避免逐订单写入以节省 gas。保留由 hasLevelInitialized 提供的初始等级保护。
+         // 新的等级判定：基于“小区业绩”（getTeamValue）来计算等级
+        // 同时保留由 hasLevelInitialized 提供的初始等级保护（如果已初始化则作为最低门槛）
+        // 计算初始保护等级（来自 hasLevelInitialized）
         uint8 target = 0;
         for (uint8 lv = 1; lv <= totalLevel; lv++) {
             if (hasLevelInitialized[lv][a]) {
@@ -548,15 +1177,15 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         if (oldLevel == target) {
             // 等级未变，只需确保快照一致（避免历史分配重放）
             lastLevelRewardPaid[a][target] = rewardPerLevelStored[target];
+            members[a].level = target;
             return;
         }
 
         // 调整活跃用户计数（如果用户当前有活跃订单才计入 levelActiveSupply）
-        bool isActive = activeOrders[a] > 0;
-        if (isActive && oldLevel > 0 && levelActiveSupply[oldLevel] > 0) {
+        if (oldLevel > 0 && levelActiveSupply[oldLevel] > 0) {
             levelActiveSupply[oldLevel]--;
         }
-        if (isActive && levelActiveSupply[target] < type(uint8).max) {
+     if (levelActiveSupply[target] < type(uint8).max) {
             levelActiveSupply[target]++;
         }
 
@@ -577,31 +1206,44 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         require(i <= 9 && v <= 99);
         levelParams[i][1] = v * 100;
     }
-
+    // 设置发奖间隔
     function setDailyRewardInterval(uint256 v) external onlyLauncher {
         dailyRewardInterval = v;
     }
 
-    function setParams(
-        uint256 a,
-        uint256 b,
-        uint256 c,
-        uint256 d
-    ) external onlyLauncher {
-        getIntervalTime = a;
-        minRequiredAmount = b;
-        dailyRate = c;
-        levelRate = d;
+    // 设置领奖间隔
+    function setGetIntervalTime(uint256 v) external onlyLauncher {
+        getIntervalTime = v;
     }
 
-    function setConfigAddress(
-        address a,
-        address b,
-        address c
-    ) external onlyLauncher {
-        DINOToken = IERC20(a);
-        relShip = b;
-        usdt = c;
+    // 设置捐赠奖励参数   
+    function setStakeParams(uint256 _minAmt, uint256 _dayRate, 
+        uint256 _lvRate, uint256 _queRate, uint256 _ratRate, uint256 _recRate) external onlyLauncher {
+        minRequiredAmount = _minAmt;
+        dailyRate = _dayRate;
+        levelRate = _lvRate;
+        queueRate = _queRate;
+        ratioRate = _ratRate;
+        recRate = _recRate;
+    }
+
+    // 设置级别奖励参数   
+    function setLevelParams(uint256 _pesRate, uint256 _mktRate, 
+        uint256 _swpRate, uint256 _bakRate, uint256 _poolRate) external onlyLauncher {
+        levelPesRate = _pesRate;
+        levelMktRate = _mktRate;
+        levelSwpRate = _swpRate;
+        levelBakRate = _bakRate;
+        levelPoolRate = _poolRate;
+    }
+
+    // 设置新奖池比例
+    function setNewPoolParams(uint256 _nostkTime, uint256 _nostkRate, 
+        uint256 _fullAmt, uint256 _fullRate) external onlyLauncher {
+        nostakeTimeout = _nostkTime;
+        nostakePoolRate = _nostkRate;
+        fullPoolThreshold = _fullAmt;
+        fullPoolRate = _fullRate;
     }
 
     function setMarketingWallet(address v) external onlyLauncher {
@@ -609,35 +1251,38 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         marketingWallet = v;
     }
 
-    function setBurnWallet(address v) external onlyLauncher {
-        require(v != address(0));
-        burnWallet = v;
-    }
-
-    function setFundParams(address a, uint256 r) external onlyLauncher {
-        fundAddress = a;
-        profitRate = r;
-    }
-
     // === 内部函数 ===
     function distributeLevelReward(uint256 total) internal {
-                if (total == 0) return;
+        if (total == 0) return;
         uint256 base = 1000;
         uint256 distributed = 0;
         uint256 backflow = 0; // 未能分配出去应回流的总和（以 DINO 单位）
 
+        // 构建活跃用户列表（用于后续把 epoch 推入到每个用户）
+        address[] memory users = new address[](totalActiveUsers);
+        uint256 uidx = 0;
+        for (uint256 id = 1; id <= orderCount && uidx < totalActiveUsers; id++) {
+            Order storage o = orders[id];
+            if (!o.isOut && activeOrders[o.account] > 0) {
+                bool isDup = false;
+                for (uint256 k = 0; k < uidx; k++) {
+                    if (users[k] == o.account) {
+                        isDup = true;
+                        break;
+                    }
+                }
+                if (!isDup) users[uidx++] = o.account;
+            }
+        }
+
         for (uint8 lv = 1; lv <= 9; lv++) {
             uint256 cnt = levelActiveSupply[lv];
-            uint256 full = lv <= 4
-                ? (total * 125) / base
-                : (total * 100) / base;
-
+            uint256 full = lv <= 4 ? (total * 125) / base : (total * 100) / base;
             // 没有符合要求的活跃用户：整份回流到池中
             if (cnt == 0) {
                 backflow += full;
                 continue;
             }
-
             // 新规则：当活跃用户数未达到阈值时，先以 full 为基准，再按 levelParams[lv][1] 的万分比缩放；
             // 当达到阈值时，按 full 直接分配。
             uint256 reward;
@@ -649,9 +1294,27 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
                 reward = full;
             }
 
-            // 将该等级的总奖励累加到 rewardPerLevelStored（以 DINO 单位保存总池）
-            rewardPerLevelStored[lv] += reward;
+            // 使用局部 reward 立即创建 epoch（避免把数值写入全局映射再清零，导致重复或竞态）
             distributed += reward;
+
+            if (reward > 0 && cnt > 0) {
+                uint256 perUser = reward / cnt;
+                if (perUser > 0) {
+                    uint256 eid = ++levelEpoch;
+                    levelEpochPerUser[eid] = perUser;
+                    levelEpochLevel[eid] = lv;
+
+                    uint256 userCount = 0;
+                    for (uint256 i = 0; i < uidx; i++) {
+                        address acct = users[i];
+                        if (members[acct].level != lv) continue;
+                        userLevelEpochs[acct].push(eid);
+                        userCount++;
+                    }
+
+                    emit EpochCreated(1, eid, perUser, lv, userCount);
+                }
+            }
         }
 
         if (distributed > total) distributed = total;
@@ -671,10 +1334,10 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         _pushAccountLog(address(this), pool, 0);
         if (pool == 0) return;
         uint256 value = calculateTokenToValue(pool);
-    // value 以 USDT 最小单位（6 位小数）表示
-    // 基准：当 value <= 1,000,000 USDT 时，max = 50
-    // 之后每增加 100,000 USDT，max 增加 5 人
-    uint256 usdtBase = 1_000_000 * 1e6;
+        // value 以 USDT 最小单位（6 位小数）表示
+        // 基准：当 value <= 1,000,000 USDT 时，max = 50
+        // 之后每增加 100,000 USDT，max 增加 5 人
+        uint256 usdtBase = 1_000_000 * 1e6;
         uint256 max;
         if (value <= usdtBase) {
             max = 50;
@@ -685,37 +1348,80 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
             // each increment adds 5 people
             max = 50 + (increments * 5);
         }
-        // 2. 新增：统计「有效订单数」（未出局 + 订单所属用户有有效订单）
+        // 2. 新增：统计「有效订单数」与总权益余额（未出局 + 订单所属用户有活跃订单）
         uint256 totalValidOrders = 0;
+        uint256 totalBalance = 0;
         for (uint256 id = 1; id <= orderCount; id++) {
             Order storage o = orders[id];
             // 有效订单条件：订单未出局 + 订单所属用户有活跃订单（activeOrders > 0）
             if (!o.isOut && activeOrders[o.account] > 0) {
                 totalValidOrders++;
+                totalBalance += o.stake.balance;
             }
         }
 
         actualOrderCount = totalValidOrders < max ? totalValidOrders : max;
 
-    if (actualOrderCount > 0) rewardPerQueueStored += pool;
+    // 如果存在有效订单，把这次队列奖励做成一个 epoch 快照，延迟到订单被用户交互时逐个结算。
+    if (actualOrderCount > 0) {
+        // 创建 epoch
+        uint256 epoch = ++queueEpoch;
+        queueEpochReward[epoch] = pool;
+        // 保存初始分配量（用于按固定初始值计算每个 order 的份额，避免处理顺序影响）
+        queueEpochInitialReward[epoch] = pool;
+
+        // 存储期望的 totalBalance 与 expected count
+        if (totalBalance == 0) {
+            // 回流
+            _totalSupply += pool;
+            queueEpochReward[epoch] = 0;
+            return;
+        }
+        queueEpochTotalBalance[epoch] = totalBalance;
+        // Single-shot snapshot: record all top orders for this epoch immediately.
+        Order[] memory top = getTopNActiveOrders(0, actualOrderCount);
+        for (uint256 i = 0; i < top.length; i++) {
+            uint256 id = top[i].index;
+            queueEpochOrders[epoch].push(id);
+            orderQueueEpochs[id].push(epoch);
+            // emit per-order snapshot record for easier on-chain debugging
+            emit EpochOrderRecorded(0, epoch, id, top[i].stake.balance);
+        }
+        // record how many orders are expected to be processed for this epoch
+        queueEpochRemainingCount[epoch] = top.length;
+        emit EpochCreated(0, epoch, pool, totalBalance, actualOrderCount);
+    }
     }
 
     function distributeRatioReward(uint256 pool) internal {
-        if (pool > 0) {
-            rewardPerRatioStored += pool;
+        _pushAccountLog(address(this), pool, 1);
+        if (pool == 0) return;
+
+        // Use accRatioPerShare model: update accumulated reward per share (scaled)
+        // This avoids writing to every order on distribution and allows per-order lazy
+        // settlement when the order owner interacts.
+        if (snapshotTotalSupply == 0) {
+            // nothing to distribute
+            _totalSupply += pool;
+            return;
         }
-         _pushAccountLog(address(this), pool, 1);
+
+        uint256 epoch = ++ratioEpoch;
+        // increase accumulated per-share (scaled by RATIO_SCALE)
+        accRatioPerShare += (pool * RATIO_SCALE) / snapshotTotalSupply;
+        // still emit epoch created for on-chain traceability (no per-order list stored)
+        emit EpochCreated(2, epoch, pool, snapshotTotalSupply, 0);
     }
 
     function distributeNewPool30Percent() internal {
         if (
-            block.timestamp < last30NewPoolTime + NO_STAKE_DURATION ||
+            block.timestamp < last30NewPoolTime + nostakeTimeout ||
             newPool == 0
         ) return;
 
-    Order[] memory orders20 = getNewNActiveOrders(20);
-    if (orders20.length == 0) return; // 没有可分配的订单
-        uint256 reward30 = (newPool * 30) / 100;
+        Order[] memory orders20 = getNewNActiveOrders(20);
+        if (orders20.length == 0) return; // 没有可分配的订单
+        uint256 reward30 = (newPool * nostakePoolRate) / 100;
         uint256 per = reward30 / orders20.length;
         for (uint256 i = 0; i < orders20.length; i++) {
             orders[orders20[i].index].rewards.reward30 += per;
@@ -733,10 +1439,10 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
     function distributeNewPool70Percent() internal {
         if (newPool == 0) return;
         uint256 value = calculateTokenToValue(newPool);
-        if (value < TRIGGER_THRESHOLD) return;
-        uint256 reward70 = (newPool * 70) / 100;
-    Order[] memory orders100 = getNewNActiveOrders(100);
-    if (orders100.length == 0) return; // 没有可分配的订单
+        if (value < fullPoolThreshold) return;
+        uint256 reward70 = (newPool * fullPoolRate) / 100;
+        Order[] memory orders100 = getNewNActiveOrders(100);
+        if (orders100.length == 0) return; // 没有可分配的订单
         uint256 per = reward70 / orders100.length;
         for (uint256 i = 0; i < orders100.length; i++) {
             orders[orders100[i].index].rewards.reward70 += per;
@@ -745,6 +1451,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         emit NewPoolTriggered(newPool, value, 0, reward70, block.timestamp);
     }
 
+    // (chunked snapshot removed) snapshot list is created in single shot at epoch creation
 
 
     // 在新的逻辑中：仅在 stake 时增加业绩（没有减少分支）
@@ -755,44 +1462,34 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         teamPerformances[account] += delta;
 
         // 每次更新后尝试触发等级重算，并记录升级前后的等级以便追踪
-        {
-            uint8 oldLevel = members[account].level;
             upgradeAccountLevel(account);
-            uint8 newLevel = members[account].level;
-            if (oldLevel != newLevel) {
-                emit DebugInfo(account, 2, oldLevel, newLevel);
-            }
-        }
 
         // 向上遍历邀请链，把增量累加到每一层（深度上限 100）
-        address superior = IRelation(relShip).getInviter(account);
+        // 直接调用 getInviter（任何外部错误将向上抛出）
+        address superior = IRelation(relShip).getInviter(relShip);
         uint256 curLoop = 0;
         while (superior != address(0)) {
             teamPerformances[superior] += delta;
             // 尝试升级该上级并记录变更
-            uint8 oldLevelSup = members[superior].level;
             upgradeAccountLevel(superior);
-            uint8 newLevelSup = members[superior].level;
-            if (oldLevelSup != newLevelSup) {
-                emit DebugInfo(superior, 2, oldLevelSup, newLevelSup);
-            }
-            superior = IRelation(relShip).getInviter(superior);
+            superior = IRelation(relShip).getInviter(relShip);
             curLoop++;
             if (curLoop >= 100) break;
         }
     }
 
-    // 将原本在 _claimRewards 中的邀请链分发逻辑抽到此处，返回订单所有者实际应得的 ownerPort（DINO 单位）
+  // 将原本在 _claimRewards 中的邀请链分发逻辑抽到此处，返回订单所有者实际应得的 ownerPort（DINO 单位）
     function _distributeReferral(uint256 orderRatio, uint256 orderId, address account) internal returns (uint256 ownerPort) {
         if (orderRatio == 0) return 0;
 
-        uint256 curRefAmount = (orderRatio * 2500) / 10000; // 25% reserved for referral chain
-        address cur = IRelation(relShip).getInviter(account);
+        uint256 curRefAmount = (orderRatio * recRate) / 100; // 25% reserved for referral chain
+        address cur ;
+        cur = IRelation(relShip).getInviter(account);
         uint256 depth = 0;
         uint256 backflowLocal = 0;
         while (cur != address(0) && depth < 100) {
             if (curRefAmount < 1) break;
-            uint256 nextAmount = (curRefAmount * 5000) / 10000;
+            uint256 nextAmount = (curRefAmount * 50) / 100;
             uint256 netAmount;
             if (nextAmount < 1) {
                 netAmount = curRefAmount;
@@ -803,23 +1500,21 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
             }
 
             if (netAmount >= 1) {
-// 仅当推荐人有活跃订单（activeOrders>0）时分配推荐奖励
                 if (activeOrders[cur] > 0) {
                     refReward_map[cur] += netAmount;
                     emit RefCredit(cur, netAmount, orderId);
                 } else {
-// 推荐人无活跃订单：这部分记入回流，稍后回流到 _totalSupply
                     backflowLocal += netAmount;
                 }
             }
 
-            address next = IRelation(relShip).getInviter(cur);
+            address next;
+            next = IRelation(relShip).getInviter(cur);
             cur = next;
             depth++;
             if (curRefAmount == 0) break;
         }
 
-// 把未分配（包括链中未消费部分 curRefAmount 与因推荐人无活跃订单而累积的 backflowLocal）回流到 _totalSupply
         if (curRefAmount > 0) {
             backflowLocal += curRefAmount;
             curRefAmount = 0;
@@ -888,15 +1583,15 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
             if (orderRatio > 0) {
                 ownerPort = _distributeReferral(orderRatio, id, ord.account);
             }
-            pending = ord.rewards.queue + ownerPort + refReward_map[user];
+            pending = (ord.rewards.queue + ownerPort + refReward_map[user] + ord.rewards.reward30 + ord.rewards.reward70);
         } else {
-            pending = ord.rewards.level + ord.rewards.reward30 + ord.rewards.reward70;
+            pending = ord.rewards.level;
         }
 
         if (pending == 0) return (0, 0);
 
         uint256 qQueue = ord.rewards.queue;
-        uint256 maxValue = ord.stake.value * outMultiple;
+        uint256 maxValue = ord.stake.remain;
         uint256 pendingValue = calculateTokenToValue(pending);
 
         if (ord.stake.received + pendingValue > maxValue) {
@@ -905,9 +1600,8 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
 
             paidFromQueue = _consumeExcessAndComputePaidFromQueue(qQueue, ownerPort, tempExcess, user);
 
-
             ord.stake.received = maxValue;
-            // 按新的业务要求：团队业绩仅在 stake 时增加，不在出局时减少，因此不再调用 _propagateSubtreeDelta 以减少业绩。
+            // _propagateSubtreeDelta(ord.account, -int256(ord.stake.value));
             ord.isOut = true;
             if (--activeOrders[ord.account] == 0) {
                 totalActiveUsers--;
@@ -927,146 +1621,15 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         if (rtype == RewardType.Main) {
             ord.rewards.queue = 0;
             ord.rewards.ratio = 0;
-        } else {
-            ord.rewards.level = 0;
             ord.rewards.reward30 = 0;
             ord.rewards.reward70 = 0;
+        } else {
+            ord.rewards.level = 0;
         }
 
         return (payout, paidFromQueue);
     }
 
-
-
-
-    function setEarned() internal {
-        // Queue: 按订单 stake.balance 加权分配（而不是简单平均）
-        if (actualOrderCount > 0 && rewardPerQueueStored > 0) {
-            Order[] memory top = getTopNActiveOrders(actualOrderCount);
-            if (top.length > 0) {
-                // 计算这些排队订单的总 stake.balance
-                uint256 totalBalance = 0;
-                for (uint256 i = 0; i < top.length; i++) {
-                    totalBalance += top[i].stake.balance;
-                }
-                if (totalBalance > 0) {
-                    uint256 distributed = 0;
-                    for (uint256 i = 0; i < top.length; i++) {
-                        uint256 share = (rewardPerQueueStored * top[i].stake.balance) / totalBalance;
-                        // 累加到订单的 queue 奖励（保留历史值）
-                        orders[top[i].index].rewards.queue += share;
-                        distributed += share;
-                    }
-                    // 处理因除法产生的舍入误差，把残余加到第一个订单
-                    if (rewardPerQueueStored > distributed) {
-                        uint256 leftover = rewardPerQueueStored - distributed;
-                        orders[top[0].index].rewards.queue += leftover;
-                    }
-                }
-            }
-        }
-
-
-    uint256 supplyForWeight = snapshotTotalSupply > 0 ? snapshotTotalSupply : _totalSupply;
-    if (rewardPerRatioStored > 0 && supplyForWeight > 0) {
-            uint256 totalActiveOrderCount = 0;
-            // 第一步：统计活跃订单总数（避免重复遍历）
-            for (uint256 id = 1; id <= orderCount; id++) {
-                Order storage o = orders[id];
-                if (!o.isOut && activeOrders[o.account] > 0) {
-                    totalActiveOrderCount++;
-                }
-            }
-            if (totalActiveOrderCount == 0) return;
-
-            // 第二步：遍历活跃订单，按权重分配奖励
-            for (uint256 id = 1; id <= orderCount; id++) {
-                Order storage o = orders[id];
-                // 仅处理「未出局 + 所属用户有活跃订单」的有效订单
-                if (o.isOut || activeOrders[o.account] == 0) continue;
-
-                // 计算当前订单权重（balance / _totalSupply），用 RATIO_SCALE 放大避免精度丢失
-                uint256 orderWeight = (o.stake.balance * RATIO_SCALE) / supplyForWeight;
-
-                // 订单应得的比例奖份额（以 DINO 单位计）
-                uint256 orderShare = (rewardPerRatioStored * orderWeight) / RATIO_SCALE;
-                if (orderShare == 0) continue;
-
-                // 推荐分发新规则已简化：不在分发阶段沿邀请链写入 refReward_map，
-                // 而是将完整的 orderShare 放入订单的 ratio 槽中，
-                // 在用户 claim 时再沿链拆分并把上级份额累加到 refReward_map。
-                // 这样可以把邀请链分配集中到 claim 时处理，便于审计与避免分发/claim 重复写入。
-                o.rewards.ratio += orderShare;
-            }
-
-            // 分配完成后重置 rewardPerRatioStored（避免重复分配）
-            rewardPerRatioStored = 0;
-        }
-
-        // Level
-        address[] memory users = new address[](totalActiveUsers);
-        uint256 idx = 0;
-        for (uint256 id = 1; id <= orderCount && idx < totalActiveUsers; id++) {
-            Order storage o = orders[id];
-            if (!o.isOut && activeOrders[o.account] > 0) {
-                bool isDuplicate = false;
-                for (uint256 k = 0; k < idx; k++) {
-                    if (users[k] == o.account) {
-                        isDuplicate = true;
-                        break;
-                    }
-                }
-                if (!isDuplicate) {
-                    users[idx++] = o.account;
-                }
-            }
-        }
-
-        // 第二步：按用户等级分配奖励（按用户而非订单级别）
-        // 每个等级的总份额先按用户数均分（levelActiveSupply 为活跃用户数），
-        // 然后再把单个用户的份额按该用户的活跃订单数均分到其订单上。
-        for (uint8 lv = 1; lv <= 9; lv++) {
-            if (levelActiveSupply[lv] == 0 || rewardPerLevelStored[lv] == 0) continue;
-            uint256 perUser = rewardPerLevelStored[lv] / levelActiveSupply[lv];
-            for (uint256 i = 0; i < idx; i++) {
-                address acct = users[i];
-                // 仅按 members 映射的用户级别进行分配（而不是订单级别）
-                if (members[acct].level != lv) continue;
-
-                uint256 userActiveCount = activeOrders[acct];
-                if (userActiveCount == 0) continue;
-
-                // 新策略：按订单时间（最早订单优先）分配，优先把每笔订单分配到其 cap（maxValue）
-                uint256 remainingUser = perUser;
-                for (uint256 j = 0; j < userOrders[acct].length; j++) {
-                    if (remainingUser == 0) break;
-                    Order storage o = orders[userOrders[acct][j]];
-                    if (o.isOut) continue;
-
-                    // 每笔订单的上限（USDT 单位）
-                    uint256 maxValue = o.stake.value * outMultiple;
-                    // 剩余可领取价值（USDT 单位）
-                    uint256 remainValue = maxValue > o.stake.received ? maxValue - o.stake.received : 0;
-                    if (remainValue == 0) continue;
-
-                    // 把 remainValue（USDT）转换为可领取的 DINO 数量
-                    uint256 allowDino = calculateValueToToken(remainValue);
-                    if (allowDino == 0) continue;
-
-                    uint256 give = allowDino <= remainingUser ? allowDino : remainingUser;
-                    o.rewards.level += give;
-                    remainingUser -= give;
-                }
-
-                // 如果该用户所有订单已满仍有余额，回流到 _totalSupply（以便未来分配）
-                if (remainingUser > 0) {
-                    _totalSupply += remainingUser;
-                }
-            }
-            // 本等级的奖励已分配，清零 avoid double-distribution
-            rewardPerLevelStored[lv] = 0;
-        }
-    }
 
     // === 视图函数 ===
     function balanceOf(address a) public view returns (uint256) {
@@ -1078,9 +1641,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         return bal;
     }
 
-    function pendingEarned(
-        address user
-    ) public view returns (uint256 reward, uint256 value) {
+   function pendingEarned(address user) public view returns (uint256 reward, uint256 value) {
         if (activeOrders[user] == 0) return (0, 0);
         uint256 pending = 0;
         uint256 received = 0;
@@ -1090,9 +1651,13 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         for (uint256 i = 0; i < userOrders[user].length; i++) {
             Order storage o = orders[userOrders[user][i]];
             if (o.isOut) continue;
-            pending += o.rewards.queue + o.rewards.ratio;
+            // include unprocessed ratio delta based on accRatioPerShare
+            uint256 unprocessedRatio = 0;
+            uint256 currentDebt = (o.stake.balance * accRatioPerShare) / RATIO_SCALE;
+            if (currentDebt > o.ratioDebt) unprocessedRatio = currentDebt - o.ratioDebt;
+            pending += (o.rewards.queue + o.rewards.ratio + unprocessedRatio + o.rewards.reward30 + o.rewards.reward70);
             received += o.stake.received;
-            cap += o.stake.value;
+            cap += o.stake.remain;  // 可释放总价值
         }
         if (pending == 0) return (0, 0);
         uint256 pValue = calculateTokenToValue(pending);
@@ -1106,9 +1671,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         }
     }
 
-    function pendingEarnedLevel(
-        address user
-    ) public view returns (uint256 reward, uint256 value) {
+    function pendingEarnedLevel(address user) public view returns (uint256 reward, uint256 value) {
         if (activeOrders[user] == 0) return (0, 0);
         uint256 pending = 0;
         uint256 received = 0;
@@ -1119,7 +1682,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
             if (o.isOut) continue;
             pending += o.rewards.level;
             received += o.stake.received;
-            cap += o.stake.value;
+            cap += o.stake.remain;  // 可释放总价值
         }
         if (pending == 0) return (0, 0);
         uint256 pValue = calculateTokenToValue(pending);
@@ -1140,9 +1703,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
      *  - receivedDino: 累计领取的 DINO 数量（members[user].received）
      *  - receivedValueUSDT: 累计领取的价值（USDT 最小单位，按每次领取时价格累加，members[user].receivedValue）
      */
-    function getUserClaimed(
-        address user
-    ) public view returns (
+    function getUserClaimed(address user) public view returns (
         uint256 donatedDino,
         uint256 expectedValueUSDT,
         uint256 receivedDino,
@@ -1154,22 +1715,26 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         receivedValueUSDT = members[user].receivedValue;
     }
 
-    function getTopNActiveOrders(
-        uint256 n
-    ) public view returns (Order[] memory res) {
+    // 返回从第 `offset` 个有效订单开始的最多 `n` 条有效订单（正序，从最旧到最新）。
+    function getTopNActiveOrders(uint256 offset, uint256 n) public view returns (Order[] memory res) {
+        if (n == 0) return new Order[](0);
         uint256[] memory ids = new uint256[](n);
         uint256 cnt = 0;
-        // 改为正序遍历：从最旧订单（id=1）到最新订单（id=orderCount）
-        for (uint256 id = 1; id <= orderCount && cnt < n; id++)
-            if (!orders[id].isOut && activeOrders[orders[id].account] > 0)
-                ids[cnt++] = id;
+        uint256 seen = 0; // number of valid orders seen so far
+        for (uint256 id = 1; id <= orderCount && cnt < n; id++) {
+            if (!orders[id].isOut && activeOrders[orders[id].account] > 0) {
+                if (seen >= offset) {
+                    ids[cnt++] = id;
+                }
+                seen++;
+            }
+        }
         res = new Order[](cnt);
         for (uint256 i = 0; i < cnt; i++) res[i] = orders[ids[i]];
     }
 
-    function getNewNActiveOrders(
-        uint256 n
-    ) public view returns (Order[] memory res) {
+
+  function getNewNActiveOrders(uint256 n) public view returns (Order[] memory res) {
         uint256[] memory ids = new uint256[](n);
         uint256 cnt = 0;
         // 关键：从最大订单ID（最新订单）开始遍历，取前 n 个有效订单
@@ -1180,9 +1745,7 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         for (uint256 i = 0; i < cnt; i++) res[i] = orders[ids[i]];
     }
 
-    function getLevelByTeamValue(
-        address user
-    ) public view returns (uint8 level) {
+   function getLevelByTeamValue(address user) public view returns (uint8 level) {
         // getTeamValue 返回的是以 USDT 最小单位（6 位小数）为单位的数值
         uint256 allTeamValue = getTeamValue(user);
         if (allTeamValue == 0) return 0;
@@ -1194,17 +1757,14 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
             if (i < levelRequiredAmount.length - 1) {
                 nextThreshold = levelRequiredAmount[i + 1];
             }
-
             bool meetCurrentLevel = allTeamValue >= threshold;
             bool lessThanNextLevel = (i == levelRequiredAmount.length - 1) || (allTeamValue < nextThreshold);
-
             if (meetCurrentLevel && lessThanNextLevel) {
                 return uint8(i + 1);
             }
         }
-
-         // 如果没有匹配任何区间，表示未达到任何等级门槛
-            return 0;
+        // 如果没有匹配任何区间，表示未达到任何等级门槛
+        return 0;
     }
 
     /**
@@ -1257,10 +1817,11 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         // 路径：DINO → WETH → USDT（符合 Uniswap V2 常见交易对逻辑）
         address[] memory path = new address[](2);
         path[0] = address(DINOToken); // 输入代币：DINO（IERC20 转 address 合法）
+        path[1] = usdt; 
         // path[1] = WETH; // 中间代币：WETH（合约已定义为 Base 主网/测试网 WETH 地址）
-        path[1] = usdt; // 输出代币：USDT（合约中已定义的地址）
+        // path[2] = usdt; // 输出代币：USDT（合约中已定义的地址）
 
-        // 调用 getAmountsOut（带`s`），返回数组的最后一个元素是最终 USDT 数量
+        // 调用 getAmountsOut 并返回数组的最后一个元素（让潜在的 revert 向上抛出）
         uint256[] memory amounts = uniswapRouter.getAmountsOut(amount, path);
         return amounts[amounts.length - 1]; // 直接取最后一个元素，避免数组长度错误
     }
@@ -1273,10 +1834,12 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         // 反向路径：USDT → WETH → DINO
         address[] memory path = new address[](2);
         path[0] = usdt; // 输入代币：USDT
-        // path[1] = WETH; // 中间代币：WETH
-        path[1] = address(DINOToken); // 输出代币：DINO
+        path[1] = address(DINOToken); // 中间代币：WETH
 
-        // 调用 getAmountsOut，返回数组的最后一个元素是最终 DINO 数量
+        // path[1] = WETH; // 中间代币：WETH
+        // path[2] = address(DINOToken); // 输出代币：DINO
+
+        // 调用 getAmountsOut 并返回数组的最后一个元素（让潜在的 revert 向上抛出）
         uint256[] memory amounts = uniswapRouter.getAmountsOut(value, path);
         return amounts[amounts.length - 1];
     }
@@ -1293,21 +1856,16 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
         path[0] = address(DINOToken);
         path[1] = WETH;
         path[2] = TARGET_TOKEN;
-        // 保持对黑洞 swap 的容错：失败时不回退，记录/忽略失败
-        try
-            uniswapRouter.swapExactTokensForTokens(
-                dinoAmount,
-                0,
-                path,
-                burnWallet,
-                block.timestamp + 300
-            )
-        returns (uint256[] memory) {
-            // 成功才扣除
-            blackHolePool -= dinoAmount;
-        } catch {
-            // ignore swap failure to avoid blocking user flows; monitoring via off-chain keeper
-        }
+        // 直接执行 swap（任何失败将向上抛出并回退交易）
+        uniswapRouter.swapExactTokensForTokens(
+            dinoAmount,
+            0,
+            path,
+            burnWallet,
+            block.timestamp + 300
+        );
+        // 成功才扣除
+        blackHolePool -= dinoAmount;
     }
 
     // 手动/受控执行黑洞 swap 的入口
@@ -1346,6 +1904,4 @@ contract DINOFinanceTokenV2 is Ownable(msg.sender), ReentrancyGuard {
             index++;
         }
     }
-
-
 }
